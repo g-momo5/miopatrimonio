@@ -16,6 +16,9 @@ export function buildBackupPayload(state: PortfolioDataState): BackupPayload {
       iconMode: institution.icon_mode,
       iconKey: institution.icon_key,
       iconUrl: institution.icon_url,
+      logoScale: Number(institution.logo_scale),
+      logoOffsetX: Number(institution.logo_offset_x),
+      logoOffsetY: Number(institution.logo_offset_y),
     })),
     accounts: state.accounts.map((account) => ({
       name: account.name,

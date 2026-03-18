@@ -4,8 +4,11 @@ const institutionSchema = z.object({
   name: z.string().min(1),
   kind: z.enum(['bank', 'broker', 'custom']),
   iconMode: z.enum(['predefined', 'custom']),
-  iconKey: z.string().nullable(),
-  iconUrl: z.string().url().nullable(),
+  iconKey: z.string().nullable().optional().default(null),
+  iconUrl: z.string().min(1).nullable().optional().default(null),
+  logoScale: z.number().positive().optional().default(1),
+  logoOffsetX: z.number().optional().default(0),
+  logoOffsetY: z.number().optional().default(0),
 })
 
 const accountSchema = z.object({

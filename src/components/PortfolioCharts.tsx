@@ -1,6 +1,4 @@
 import {
-  Bar,
-  BarChart,
   Cell,
   CartesianGrid,
   Legend,
@@ -19,10 +17,22 @@ import type { TrendPoint } from '../lib/calculations'
 interface PortfolioChartsProps {
   trendData: TrendPoint[]
   allocationData: Array<{ name: string; value: number }>
-  institutionData: Array<{ name: string; value: number }>
+  institutionData: Array<{ name: string; value: number; color?: string }>
 }
 
 const PIE_COLORS = ['#2f4858', '#33658a', '#86bbd8', '#f6ae2d']
+const INSTITUTION_COLORS = [
+  '#0f766e',
+  '#2563eb',
+  '#f59e0b',
+  '#9333ea',
+  '#db2777',
+  '#dc2626',
+  '#0ea5e9',
+  '#16a34a',
+  '#a16207',
+  '#4f46e5',
+]
 
 export function PortfolioCharts({
   trendData,
@@ -85,12 +95,12 @@ export function PortfolioCharts({
                 data={allocationData}
                 cx="50%"
                 cy="50%"
+                innerRadius={44}
+                outerRadius={96}
+                nameKey="name"
                 labelLine={false}
-                outerRadius={94}
                 dataKey="value"
-                label={({ name, percent }) =>
-                  `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                }
+                label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
               >
                 {allocationData.map((entry, index) => (
                   <Cell
@@ -100,6 +110,7 @@ export function PortfolioCharts({
                 ))}
               </Pie>
               <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+              <Legend />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -112,13 +123,28 @@ export function PortfolioCharts({
         </header>
         <div className="chart-box">
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={institutionData} layout="vertical" margin={{ left: 16, right: 16 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(17, 24, 39, 0.1)" />
-              <XAxis type="number" tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
-              <YAxis dataKey="name" type="category" width={140} />
+            <PieChart>
+              <Pie
+                data={institutionData}
+                cx="50%"
+                cy="50%"
+                innerRadius={44}
+                outerRadius={96}
+                dataKey="value"
+                nameKey="name"
+                labelLine={false}
+                label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
+              >
+                {institutionData.map((entry, index) => (
+                  <Cell
+                    key={entry.name}
+                    fill={entry.color ?? INSTITUTION_COLORS[index % INSTITUTION_COLORS.length]}
+                  />
+                ))}
+              </Pie>
               <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-              <Bar dataKey="value" fill="#0f766e" radius={[0, 8, 8, 0]} />
-            </BarChart>
+              <Legend />
+            </PieChart>
           </ResponsiveContainer>
         </div>
       </article>

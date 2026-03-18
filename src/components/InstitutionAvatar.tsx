@@ -5,6 +5,9 @@ interface InstitutionAvatarProps {
   iconUrl?: string | null
   iconCandidates?: string[]
   size?: number
+  logoScale?: number
+  logoOffsetX?: number
+  logoOffsetY?: number
 }
 
 const PALETTE = ['#124559', '#598392', '#aec3b0', '#01161e', '#3f3d56', '#2f4858']
@@ -14,6 +17,9 @@ export function InstitutionAvatar({
   iconUrl,
   iconCandidates,
   size = 32,
+  logoScale = 1,
+  logoOffsetX = 0,
+  logoOffsetY = 0,
 }: InstitutionAvatarProps) {
   const [failedByKey, setFailedByKey] = useState<Record<string, number>>({})
 
@@ -49,29 +55,38 @@ export function InstitutionAvatar({
   }, [name])
 
   const currentCandidate = candidates[candidateIndex]
+  const imageTransform = `translate(${logoOffsetX}px, ${logoOffsetY}px) scale(${logoScale})`
 
   if (currentCandidate) {
     return (
-      <img
-        src={currentCandidate}
-        alt={name}
-        width={size}
-        height={size}
-        className="institution-avatar"
-        loading="lazy"
-        onError={() =>
-          setFailedByKey((previous) => ({
-            ...previous,
-            [candidateListKey]: (previous[candidateListKey] ?? 0) + 1,
-          }))
-        }
-      />
+      <div
+        className="institution-avatar-shell"
+        style={{ width: size, height: size }}
+        aria-label={name}
+        title={name}
+      >
+        <img
+          src={currentCandidate}
+          alt={name}
+          width={size}
+          height={size}
+          className="institution-avatar"
+          loading="lazy"
+          style={{ transform: imageTransform }}
+          onError={() =>
+            setFailedByKey((previous) => ({
+              ...previous,
+              [candidateListKey]: (previous[candidateListKey] ?? 0) + 1,
+            }))
+          }
+        />
+      </div>
     )
   }
 
   return (
     <div
-      className="institution-avatar fallback"
+      className="institution-avatar-shell institution-avatar-fallback"
       style={{ width: size, height: size, backgroundColor: background }}
       aria-label={name}
       title={name}

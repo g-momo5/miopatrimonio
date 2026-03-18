@@ -31,6 +31,18 @@ describe('resolveInstitutionLogoCandidates', () => {
       icon_url: 'https://example.com/logo.png',
     })
 
-    expect(candidates).toEqual(['https://example.com/logo.png'])
+    expect(candidates[0]).toBe('https://example.com/logo.png')
+    expect(candidates).toContain('https://icons.duckduckgo.com/ip3/example.com.ico')
+  })
+
+  it('per preset con override custom mantiene fallback al logo preset', () => {
+    const candidates = resolveInstitutionLogoCandidates({
+      icon_key: 'bbva',
+      icon_mode: 'custom',
+      icon_url: 'https://example.com/custom-bbva.png',
+    })
+
+    expect(candidates[0]).toBe('https://example.com/custom-bbva.png')
+    expect(candidates).toContain('/logos/bbva.ico')
   })
 })

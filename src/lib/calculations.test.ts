@@ -15,6 +15,9 @@ const institutions: Institution[] = [
     icon_mode: 'predefined',
     icon_key: 'intesa-sanpaolo',
     icon_url: null,
+    logo_scale: 1,
+    logo_offset_x: 0,
+    logo_offset_y: 0,
     created_at: '2026-01-01T00:00:00.000Z',
   },
   {
@@ -25,6 +28,9 @@ const institutions: Institution[] = [
     icon_mode: 'predefined',
     icon_key: 'trade-republic',
     icon_url: null,
+    logo_scale: 1,
+    logo_offset_x: 0,
+    logo_offset_y: 0,
     created_at: '2026-01-01T00:00:00.000Z',
   },
 ]

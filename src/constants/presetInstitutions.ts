@@ -6,6 +6,7 @@ export interface PresetInstitution {
   kind: InstitutionKind
   fallbackDomain: string
   logoPath: string
+  primaryColor: string
 }
 
 export const PRESET_INSTITUTIONS: PresetInstitution[] = [
@@ -15,6 +16,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'intesasanpaolo.com',
     logoPath: '/logos/intesa-sanpaolo.ico',
+    primaryColor: '#008752',
   },
   {
     key: 'unicredit',
@@ -22,6 +24,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'unicredit.it',
     logoPath: '/logos/unicredit.ico',
+    primaryColor: '#e30613',
   },
   {
     key: 'banco-bpm',
@@ -29,6 +32,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'bancobpm.it',
     logoPath: '/logos/banco-bpm.ico',
+    primaryColor: '#0094d9',
   },
   {
     key: 'bper',
@@ -36,6 +40,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'bper.it',
     logoPath: '/logos/bper.ico',
+    primaryColor: '#00a66f',
   },
   {
     key: 'mps',
@@ -43,6 +48,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'mps.it',
     logoPath: '/logos/mps.ico',
+    primaryColor: '#8a1538',
   },
   {
     key: 'fineco',
@@ -50,6 +56,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'finecobank.com',
     logoPath: '/logos/fineco.ico',
+    primaryColor: '#ffd100',
   },
   {
     key: 'credem',
@@ -57,6 +64,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'credem.it',
     logoPath: '/logos/credem.ico',
+    primaryColor: '#f4c400',
   },
   {
     key: 'bancoposta',
@@ -64,6 +72,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'poste.it',
     logoPath: '/logos/bancoposta.ico',
+    primaryColor: '#f5c400',
   },
   {
     key: 'ing',
@@ -71,6 +80,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'ing.it',
     logoPath: '/logos/ing.ico',
+    primaryColor: '#ff6200',
   },
   {
     key: 'mediolanum',
@@ -78,6 +88,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'bancamediolanum.it',
     logoPath: '/logos/mediolanum.ico',
+    primaryColor: '#0033a1',
   },
   {
     key: 'credit-agricole',
@@ -85,6 +96,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'credit-agricole.it',
     logoPath: '/logos/credit-agricole.ico',
+    primaryColor: '#009b77',
   },
   {
     key: 'trade-republic',
@@ -92,6 +104,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'broker',
     fallbackDomain: 'traderepublic.com',
     logoPath: '/logos/trade-republic.ico',
+    primaryColor: '#111827',
   },
   {
     key: 'bbva',
@@ -99,6 +112,7 @@ export const PRESET_INSTITUTIONS: PresetInstitution[] = [
     kind: 'bank',
     fallbackDomain: 'bbva.com',
     logoPath: '/logos/bbva.ico',
+    primaryColor: '#072146',
   },
 ]
 

@@ -14,6 +14,9 @@ export interface Institution {
   icon_mode: InstitutionIcon
   icon_key: string | null
   icon_url: string | null
+  logo_scale: number
+  logo_offset_x: number
+  logo_offset_y: number
   created_at: string
 }
 
@@ -96,6 +99,9 @@ export interface BackupPayload {
     iconMode: InstitutionIcon
     iconKey: string | null
     iconUrl: string | null
+    logoScale: number
+    logoOffsetX: number
+    logoOffsetY: number
   }>
   accounts: Array<{
     name: string

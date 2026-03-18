@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseOrThrow } from '../lib/supabase'
 import { parseBackupPayload } from '../lib/backup'
 import type {
@@ -29,14 +30,45 @@ interface UsePortfolioDataResult {
   error: string | null
   offlineReadOnly: boolean
   refresh: () => Promise<void>
-  addInstitution: (input: {
+  updateInstitution: (input: {
+    institutionId: string
     name: string
     kind: InstitutionKind
     iconMode: InstitutionIcon
     iconKey?: string | null
     iconUrl?: string | null
+    logoScale: number
+    logoOffsetX: number
+    logoOffsetY: number
+  }) => Promise<void>
+  upsertPresetInstitutionOverride: (input: {
+    presetKey: string
+    defaultName: string
+    defaultKind: InstitutionKind
+    name: string
+    iconMode: InstitutionIcon
+    iconUrl?: string | null
+    logoScale: number
+    logoOffsetX: number
+    logoOffsetY: number
   }) => Promise<void>
   createAccount: (input: {
+    name: string
+    accountType: 'bank' | 'investment'
+    initialBalanceEur: number
+    institution: {
+      name: string
+      kind: InstitutionKind
+      iconMode: InstitutionIcon
+      iconKey?: string | null
+      iconUrl?: string | null
+      logoScale: number
+      logoOffsetX: number
+      logoOffsetY: number
+    }
+  }) => Promise<void>
+  updateAccount: (input: {
+    accountId: string
     name: string
     accountType: 'bank' | 'investment'
     institution: {
@@ -45,6 +77,9 @@ interface UsePortfolioDataResult {
       iconMode: InstitutionIcon
       iconKey?: string | null
       iconUrl?: string | null
+      logoScale: number
+      logoOffsetX: number
+      logoOffsetY: number
     }
   }) => Promise<void>
   toggleArchiveAccount: (accountId: string, isArchived: boolean) => Promise<void>
@@ -206,28 +241,67 @@ export function usePortfolioData(
     }
   }, [isOnline, userId])
 
-  const addInstitution = useCallback(
+  const updateInstitution = useCallback(
     async (input: {
+      institutionId: string
       name: string
       kind: InstitutionKind
       iconMode: InstitutionIcon
       iconKey?: string | null
       iconUrl?: string | null
+      logoScale: number
+      logoOffsetX: number
+      logoOffsetY: number
     }) => {
       ensureWritable()
       const supabase = getSupabaseOrThrow()
+      const institutionName = input.name.trim()
 
-      const { error: insertError } = await supabase.from('institutions').insert({
-        user_id: userId,
-        name: input.name.trim(),
-        kind: input.kind,
-        icon_mode: input.iconMode,
-        icon_key: input.iconKey ?? null,
-        icon_url: input.iconUrl ?? null,
-      })
+      if (!institutionName) {
+        throw new Error('Nome istituto non valido')
+      }
 
-      if (insertError) {
-        throw new Error(insertError.message)
+      const style = normalizeLogoStyle(
+        input.logoScale,
+        input.logoOffsetX,
+        input.logoOffsetY,
+      )
+
+      const { error: updateError } = await supabase
+        .from('institutions')
+        .update({
+          name: institutionName,
+          kind: input.kind,
+          icon_mode: input.iconMode,
+          icon_key: input.iconKey ?? null,
+          icon_url: input.iconUrl?.trim() || null,
+          logo_scale: style.logoScale,
+          logo_offset_x: style.logoOffsetX,
+          logo_offset_y: style.logoOffsetY,
+        })
+        .eq('id', input.institutionId)
+        .eq('user_id', userId)
+
+      if (updateError) {
+        if (!isMissingLogoStyleColumnsError(updateError)) {
+          throw new Error(updateError.message)
+        }
+
+        const { error: fallbackUpdateError } = await supabase
+          .from('institutions')
+          .update({
+            name: institutionName,
+            kind: input.kind,
+            icon_mode: input.iconMode,
+            icon_key: input.iconKey ?? null,
+            icon_url: input.iconUrl?.trim() || null,
+          })
+          .eq('id', input.institutionId)
+          .eq('user_id', userId)
+
+        if (fallbackUpdateError) {
+          throw new Error(fallbackUpdateError.message)
+        }
       }
 
       await refresh()
@@ -235,57 +309,202 @@ export function usePortfolioData(
     [ensureWritable, refresh, userId],
   )
 
-  const createAccount = useCallback(
+  const upsertPresetInstitutionOverride = useCallback(
     async (input: {
+      presetKey: string
+      defaultName: string
+      defaultKind: InstitutionKind
       name: string
-      accountType: 'bank' | 'investment'
-      institution: {
-        name: string
-        kind: InstitutionKind
-        iconMode: InstitutionIcon
-        iconKey?: string | null
-        iconUrl?: string | null
-      }
+      iconMode: InstitutionIcon
+      iconUrl?: string | null
+      logoScale: number
+      logoOffsetX: number
+      logoOffsetY: number
     }) => {
       ensureWritable()
       const supabase = getSupabaseOrThrow()
-      const institutionName = input.institution.name.trim()
-      const accountName = input.name.trim()
+      const institutionName = input.name.trim()
 
       if (!institutionName) {
         throw new Error('Nome istituto non valido')
       }
 
-      if (!accountName) {
-        throw new Error('Nome conto non valido')
-      }
+      const style = normalizeLogoStyle(
+        input.logoScale,
+        input.logoOffsetX,
+        input.logoOffsetY,
+      )
 
-      const { data: existingInstitution, error: lookupError } = await supabase
+      const { data: existingRows, error: lookupError } = await supabase
         .from('institutions')
         .select('id')
         .eq('user_id', userId)
-        .eq('name', institutionName)
-        .maybeSingle()
+        .eq('icon_key', input.presetKey)
+        .order('created_at', { ascending: true })
+        .limit(1)
 
       if (lookupError) {
         throw new Error(lookupError.message)
       }
 
-      let institutionId = existingInstitution?.id
+      const existingInstitution = existingRows?.[0]
+      const payload = {
+        user_id: userId,
+        name: institutionName || input.defaultName,
+        kind: input.defaultKind,
+        icon_mode: input.iconMode,
+        icon_key: input.presetKey,
+        icon_url: input.iconUrl?.trim() || null,
+        logo_scale: style.logoScale,
+        logo_offset_x: style.logoOffsetX,
+        logo_offset_y: style.logoOffsetY,
+      }
+
+      if (existingInstitution?.id) {
+        const { error: updateError } = await supabase
+          .from('institutions')
+          .update(payload)
+          .eq('id', existingInstitution.id)
+          .eq('user_id', userId)
+
+        if (updateError) {
+          if (!isMissingLogoStyleColumnsError(updateError)) {
+            throw new Error(updateError.message)
+          }
+
+          const { error: fallbackUpdateError } = await supabase
+            .from('institutions')
+            .update({
+              user_id: userId,
+              name: institutionName || input.defaultName,
+              kind: input.defaultKind,
+              icon_mode: input.iconMode,
+              icon_key: input.presetKey,
+              icon_url: input.iconUrl?.trim() || null,
+            })
+            .eq('id', existingInstitution.id)
+            .eq('user_id', userId)
+
+          if (fallbackUpdateError) {
+            throw new Error(fallbackUpdateError.message)
+          }
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from('institutions')
+          .insert(payload)
+
+        if (insertError) {
+          if (!isMissingLogoStyleColumnsError(insertError)) {
+            throw new Error(insertError.message)
+          }
+
+          const { error: fallbackInsertError } = await supabase
+            .from('institutions')
+            .insert({
+              user_id: userId,
+              name: institutionName || input.defaultName,
+              kind: input.defaultKind,
+              icon_mode: input.iconMode,
+              icon_key: input.presetKey,
+              icon_url: input.iconUrl?.trim() || null,
+            })
+
+          if (fallbackInsertError) {
+            throw new Error(fallbackInsertError.message)
+          }
+        }
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
+  const getOrCreateInstitutionId = useCallback(
+    async (
+      supabase: SupabaseClient,
+      input: {
+        name: string
+        kind: InstitutionKind
+        iconMode: InstitutionIcon
+        iconKey?: string | null
+        iconUrl?: string | null
+        logoScale: number
+        logoOffsetX: number
+        logoOffsetY: number
+      },
+    ): Promise<string> => {
+      const institutionName = input.name.trim()
+      const presetKey = input.iconKey?.trim() || null
+      const style = normalizeLogoStyle(
+        input.logoScale,
+        input.logoOffsetX,
+        input.logoOffsetY,
+      )
+
+      let institutionLookup = supabase
+        .from('institutions')
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+
+      institutionLookup = presetKey
+        ? institutionLookup.eq('icon_key', presetKey)
+        : institutionLookup.eq('name', institutionName)
+
+      const { data: existingRows, error: lookupError } = await institutionLookup
+
+      if (lookupError) {
+        throw new Error(lookupError.message)
+      }
+
+      let institutionId = existingRows?.[0]?.id
 
       if (!institutionId) {
-        const { data: createdInstitution, error: createInstitutionError } = await supabase
+        const insertPayloadWithStyle = {
+          user_id: userId,
+          name: institutionName,
+          kind: input.kind,
+          icon_mode: input.iconMode,
+          icon_key: presetKey,
+          icon_url: input.iconUrl?.trim() || null,
+          logo_scale: style.logoScale,
+          logo_offset_x: style.logoOffsetX,
+          logo_offset_y: style.logoOffsetY,
+        }
+        const insertPayloadLegacy = {
+          user_id: userId,
+          name: institutionName,
+          kind: input.kind,
+          icon_mode: input.iconMode,
+          icon_key: presetKey,
+          icon_url: input.iconUrl?.trim() || null,
+        }
+
+        let createdInstitution: { id: string } | null = null
+        let createInstitutionError: { code?: string; message: string } | null = null
+
+        const withStyleResult = await supabase
           .from('institutions')
-          .insert({
-            user_id: userId,
-            name: institutionName,
-            kind: input.institution.kind,
-            icon_mode: input.institution.iconMode,
-            icon_key: input.institution.iconKey ?? null,
-            icon_url: input.institution.iconUrl ?? null,
-          })
+          .insert(insertPayloadWithStyle)
           .select('id')
           .maybeSingle()
+
+        createdInstitution = withStyleResult.data
+        createInstitutionError = withStyleResult.error
+
+        if (createInstitutionError && isMissingLogoStyleColumnsError(createInstitutionError)) {
+          const fallbackResult = await supabase
+            .from('institutions')
+            .insert(insertPayloadLegacy)
+            .select('id')
+            .maybeSingle()
+
+          createdInstitution = fallbackResult.data
+          createInstitutionError = fallbackResult.error
+        }
 
         if (createInstitutionError && createInstitutionError.code !== '23505') {
           throw new Error(createInstitutionError.message)
@@ -294,18 +513,24 @@ export function usePortfolioData(
         institutionId = createdInstitution?.id
 
         if (!institutionId) {
-          const { data: retryInstitution, error: retryLookupError } = await supabase
+          let retryLookup = supabase
             .from('institutions')
             .select('id')
             .eq('user_id', userId)
-            .eq('name', institutionName)
-            .maybeSingle()
+            .order('created_at', { ascending: true })
+            .limit(1)
+
+          retryLookup = presetKey
+            ? retryLookup.eq('icon_key', presetKey)
+            : retryLookup.eq('name', institutionName)
+
+          const { data: retryRows, error: retryLookupError } = await retryLookup
 
           if (retryLookupError) {
             throw new Error(retryLookupError.message)
           }
 
-          institutionId = retryInstitution?.id
+          institutionId = retryRows?.[0]?.id
         }
       }
 
@@ -313,21 +538,127 @@ export function usePortfolioData(
         throw new Error('Non è stato possibile creare o recuperare l’istituto')
       }
 
-      const { error: insertError } = await supabase.from('accounts').insert({
-        user_id: userId,
-        name: accountName,
-        account_type: input.accountType,
-        institution_id: institutionId,
-        currency: 'EUR',
-      })
+      return institutionId
+    },
+    [userId],
+  )
+
+  const createAccount = useCallback(
+    async (input: {
+      name: string
+      accountType: 'bank' | 'investment'
+      initialBalanceEur: number
+      institution: {
+        name: string
+        kind: InstitutionKind
+        iconMode: InstitutionIcon
+        iconKey?: string | null
+        iconUrl?: string | null
+        logoScale: number
+        logoOffsetX: number
+        logoOffsetY: number
+      }
+    }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+      const accountName = input.name.trim()
+      const initialBalance = Number(input.initialBalanceEur)
+
+      if (!accountName) {
+        throw new Error('Nome conto non valido')
+      }
+
+      if (!Number.isFinite(initialBalance) || initialBalance < 0) {
+        throw new Error('Saldo iniziale non valido')
+      }
+
+      const institutionId = await getOrCreateInstitutionId(supabase, input.institution)
+
+      const { data: createdAccount, error: insertError } = await supabase
+        .from('accounts')
+        .insert({
+          user_id: userId,
+          name: accountName,
+          account_type: input.accountType,
+          institution_id: institutionId,
+          currency: 'EUR',
+        })
+        .select('id')
+        .maybeSingle()
 
       if (insertError) {
         throw new Error(insertError.message)
       }
 
+      const accountId = createdAccount?.id
+
+      if (!accountId) {
+        throw new Error('Non è stato possibile creare il conto')
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+
+      const { error: snapshotError } = await supabase.from('account_snapshots').insert({
+        user_id: userId,
+        account_id: accountId,
+        snapshot_date: today,
+        value_eur: initialBalance,
+        note: null,
+      })
+
+      if (snapshotError) {
+        await supabase.from('accounts').delete().eq('id', accountId).eq('user_id', userId)
+        throw new Error(snapshotError.message)
+      }
+
       await refresh()
     },
-    [ensureWritable, refresh, userId],
+    [ensureWritable, getOrCreateInstitutionId, refresh, userId],
+  )
+
+  const updateAccount = useCallback(
+    async (input: {
+      accountId: string
+      name: string
+      accountType: 'bank' | 'investment'
+      institution: {
+        name: string
+        kind: InstitutionKind
+        iconMode: InstitutionIcon
+        iconKey?: string | null
+        iconUrl?: string | null
+        logoScale: number
+        logoOffsetX: number
+        logoOffsetY: number
+      }
+    }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+      const accountName = input.name.trim()
+
+      if (!accountName) {
+        throw new Error('Nome conto non valido')
+      }
+
+      const institutionId = await getOrCreateInstitutionId(supabase, input.institution)
+
+      const { error: updateError } = await supabase
+        .from('accounts')
+        .update({
+          name: accountName,
+          account_type: input.accountType,
+          institution_id: institutionId,
+        })
+        .eq('id', input.accountId)
+        .eq('user_id', userId)
+
+      if (updateError) {
+        throw new Error(updateError.message)
+      }
+
+      await refresh()
+    },
+    [ensureWritable, getOrCreateInstitutionId, refresh, userId],
   )
 
   const toggleArchiveAccount = useCallback(
@@ -550,17 +881,81 @@ export function usePortfolioData(
         icon_mode: institution.iconMode,
         icon_key: institution.iconKey,
         icon_url: institution.iconUrl,
+        logo_scale: institution.logoScale,
+        logo_offset_x: institution.logoOffsetX,
+        logo_offset_y: institution.logoOffsetY,
       }))
 
-      if (institutionRows.length > 0) {
+      const presetInstitutionRows = institutionRows.filter(
+        (institution) => institution.icon_key !== null,
+      )
+      const customInstitutionRows = institutionRows.filter(
+        (institution) => institution.icon_key === null,
+      )
+
+      if (presetInstitutionRows.length > 0) {
         const { error: institutionsError } = await supabase
           .from('institutions')
-          .upsert(institutionRows, {
+          .upsert(presetInstitutionRows, {
+            onConflict: 'user_id,icon_key',
+          })
+
+        if (institutionsError) {
+          if (!isMissingLogoStyleColumnsError(institutionsError)) {
+            throw new Error(institutionsError.message)
+          }
+
+          const legacyPresetRows = presetInstitutionRows.map((institution) => ({
+            user_id: institution.user_id,
+            name: institution.name,
+            kind: institution.kind,
+            icon_mode: institution.icon_mode,
+            icon_key: institution.icon_key,
+            icon_url: institution.icon_url,
+          }))
+
+          const { error: legacyInstitutionsError } = await supabase
+            .from('institutions')
+            .upsert(legacyPresetRows, {
+              onConflict: 'user_id,icon_key',
+            })
+
+          if (legacyInstitutionsError) {
+            throw new Error(legacyInstitutionsError.message)
+          }
+        }
+      }
+
+      if (customInstitutionRows.length > 0) {
+        const { error: institutionsError } = await supabase
+          .from('institutions')
+          .upsert(customInstitutionRows, {
             onConflict: 'user_id,name',
           })
 
         if (institutionsError) {
-          throw new Error(institutionsError.message)
+          if (!isMissingLogoStyleColumnsError(institutionsError)) {
+            throw new Error(institutionsError.message)
+          }
+
+          const legacyCustomRows = customInstitutionRows.map((institution) => ({
+            user_id: institution.user_id,
+            name: institution.name,
+            kind: institution.kind,
+            icon_mode: institution.icon_mode,
+            icon_key: institution.icon_key,
+            icon_url: institution.icon_url,
+          }))
+
+          const { error: legacyInstitutionsError } = await supabase
+            .from('institutions')
+            .upsert(legacyCustomRows, {
+              onConflict: 'user_id,name',
+            })
+
+          if (legacyInstitutionsError) {
+            throw new Error(legacyInstitutionsError.message)
+          }
         }
       }
 
@@ -702,8 +1097,10 @@ export function usePortfolioData(
     error,
     offlineReadOnly: !isOnline,
     refresh,
-    addInstitution,
+    updateInstitution,
+    upsertPresetInstitutionOverride,
     createAccount,
+    updateAccount,
     toggleArchiveAccount,
     addOrUpdateSnapshot,
     deleteSnapshot,
@@ -721,6 +1118,9 @@ function normalizeState(state: PortfolioDataState): PortfolioDataState {
       ...institution,
       icon_key: institution.icon_key ?? null,
       icon_url: institution.icon_url ?? null,
+      logo_scale: Number(institution.logo_scale ?? 1),
+      logo_offset_x: Number(institution.logo_offset_x ?? 0),
+      logo_offset_y: Number(institution.logo_offset_y ?? 0),
     })) as Institution[],
     accounts: state.accounts.map((account) => ({
       ...account,
@@ -742,4 +1142,44 @@ function normalizeState(state: PortfolioDataState): PortfolioDataState {
       target_eur: Number(goal.target_eur),
     })) as Goal[],
   }
+}
+
+function normalizeLogoStyle(
+  logoScale: number,
+  logoOffsetX: number,
+  logoOffsetY: number,
+): {
+  logoScale: number
+  logoOffsetX: number
+  logoOffsetY: number
+} {
+  const normalizedScale = Number.isFinite(logoScale)
+    ? Math.min(Math.max(logoScale, 0.6), 2.4)
+    : 1
+  const normalizedOffsetX = Number.isFinite(logoOffsetX)
+    ? Math.min(Math.max(logoOffsetX, -40), 40)
+    : 0
+  const normalizedOffsetY = Number.isFinite(logoOffsetY)
+    ? Math.min(Math.max(logoOffsetY, -40), 40)
+    : 0
+
+  return {
+    logoScale: Number(normalizedScale.toFixed(3)),
+    logoOffsetX: Number(normalizedOffsetX.toFixed(3)),
+    logoOffsetY: Number(normalizedOffsetY.toFixed(3)),
+  }
+}
+
+function isMissingLogoStyleColumnsError(error: {
+  code?: string | null
+  message?: string | null
+}): boolean {
+  const message = error.message?.toLowerCase() ?? ''
+
+  return (
+    error.code === '42703' ||
+    message.includes('logo_scale') ||
+    message.includes('logo_offset_x') ||
+    message.includes('logo_offset_y')
+  )
 }

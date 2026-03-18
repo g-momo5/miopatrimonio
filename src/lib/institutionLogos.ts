@@ -16,6 +16,19 @@ export function resolveInstitutionLogoCandidates(
   if (institution.icon_mode === 'custom') {
     if (institution.icon_url) {
       candidates.push(institution.icon_url)
+
+      const customDomain = extractDomainFromUrl(institution.icon_url)
+      if (customDomain) {
+        candidates.push(buildFaviconUrl(customDomain))
+      }
+    }
+
+    if (preset?.logoPath) {
+      candidates.push(preset.logoPath)
+    }
+
+    if (preset?.fallbackDomain) {
+      candidates.push(buildFaviconUrl(preset.fallbackDomain))
     }
 
     return dedupe(candidates)
@@ -55,4 +68,13 @@ function extractLegacyClearbitDomain(url: string): string | null {
 
 function dedupe(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)))
+}
+
+function extractDomainFromUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname || null
+  } catch {
+    return null
+  }
 }

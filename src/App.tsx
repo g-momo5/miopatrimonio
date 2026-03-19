@@ -1,5 +1,14 @@
 import { useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
+import {
+  Archive,
+  House,
+  Pencil,
+  RotateCcw,
+  Settings,
+  TrendingUp,
+  Wallet,
+} from 'lucide-react'
 import { AuthScreen } from './components/AuthScreen'
 import { InstitutionAvatar } from './components/InstitutionAvatar'
 import { PortfolioCharts } from './components/PortfolioCharts'
@@ -51,6 +60,17 @@ const CHART_FALLBACK_COLORS = [
 const DEFAULT_LOGO_SCALE = 1
 const DEFAULT_LOGO_OFFSET = 0
 const NEW_CUSTOM_CHOICE = 'new-custom'
+const NEW_CUSTOM_EDITOR_TARGET = 'editor:new-custom'
+const MAX_LOGO_FILE_SIZE_BYTES = 2 * 1024 * 1024
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Impossibile leggere il file'))
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.readAsDataURL(file)
+  })
+}
 
 function pickFallbackColor(label: string): string {
   const hash = Array.from(label).reduce(
@@ -161,6 +181,7 @@ function PortfolioWorkspace({
     error,
     offlineReadOnly,
     refresh,
+    createInstitution,
     updateInstitution,
     upsertPresetInstitutionOverride,
     createAccount,
@@ -190,7 +211,6 @@ function PortfolioWorkspace({
   const [accountCustomInstitutionName, setAccountCustomInstitutionName] = useState('')
   const [accountCustomInstitutionLogoUrl, setAccountCustomInstitutionLogoUrl] = useState('')
 
-  const [showInstitutionTools, setShowInstitutionTools] = useState(false)
   const [editorTargetKey, setEditorTargetKey] = useState(
     presetChoice(PRESET_INSTITUTIONS[0].key),
   )
@@ -328,12 +348,21 @@ function PortfolioWorkspace({
   )
 
   const editorTarget = useMemo(
-    () =>
-      editorTargets.find((target) => target.key === editorTargetKey) ??
-      editorTargets[0] ??
-      null,
+    () => {
+      if (editorTargetKey === NEW_CUSTOM_EDITOR_TARGET) {
+        return null
+      }
+
+      return (
+        editorTargets.find((target) => target.key === editorTargetKey) ??
+        editorTargets[0] ??
+        null
+      )
+    },
     [editorTargetKey, editorTargets],
   )
+
+  const isNewCustomEditor = editorTargetKey === NEW_CUSTOM_EDITOR_TARGET
 
   const accountById = useMemo(
     () => new Map(data.accounts.map((account) => [account.id, account])),
@@ -430,6 +459,18 @@ function PortfolioWorkspace({
     [data.goals, summary.total, summary.bank, summary.investment],
   )
 
+  const goalTargets = useMemo(
+    () =>
+      data.goals.reduce<Partial<Record<GoalCategory, number>>>((accumulator, goal) => {
+        const target = Number(goal.target_eur)
+        if (Number.isFinite(target) && target > 0) {
+          accumulator[goal.category] = target
+        }
+        return accumulator
+      }, {}),
+    [data.goals],
+  )
+
   const sortedSnapshots = useMemo(
     () =>
       [...data.snapshots].sort((left, right) => {
@@ -473,6 +514,15 @@ function PortfolioWorkspace({
     setEditorScale(String(target.institution.logo_scale ?? DEFAULT_LOGO_SCALE))
     setEditorOffsetX(String(target.institution.logo_offset_x ?? DEFAULT_LOGO_OFFSET))
     setEditorOffsetY(String(target.institution.logo_offset_y ?? DEFAULT_LOGO_OFFSET))
+  }
+
+  function startNewCustomInstitutionEditor(): void {
+    setEditorTargetKey(NEW_CUSTOM_EDITOR_TARGET)
+    setEditorName('')
+    setEditorLogoUrl('')
+    setEditorScale(String(DEFAULT_LOGO_SCALE))
+    setEditorOffsetX(String(DEFAULT_LOGO_OFFSET))
+    setEditorOffsetY(String(DEFAULT_LOGO_OFFSET))
   }
 
   const selectedAccountInstitution = useMemo(() => {
@@ -529,11 +579,11 @@ function PortfolioWorkspace({
   ): Promise<void> {
     event.preventDefault()
 
-    await runAction(async () => {
-      if (!editorTarget) {
-        throw new Error('Nessun istituto selezionato')
-      }
+    const successMessage = isNewCustomEditor
+      ? 'Istituto personalizzato creato'
+      : 'Istituto aggiornato'
 
+    await runAction(async () => {
       const normalizedName = editorName.trim()
       if (!normalizedName) {
         throw new Error('Inserisci il nome istituto')
@@ -553,6 +603,25 @@ function PortfolioWorkspace({
 
       const logoUrl = editorLogoUrl.trim()
       const iconMode = logoUrl ? 'custom' : 'predefined'
+
+      if (isNewCustomEditor) {
+        const createdInstitutionId = await createInstitution({
+          name: normalizedName,
+          kind: 'custom',
+          iconMode,
+          iconKey: null,
+          iconUrl: logoUrl || null,
+          logoScale: parsedScale,
+          logoOffsetX: parsedOffsetX,
+          logoOffsetY: parsedOffsetY,
+        })
+        setEditorTargetKey(customChoice(createdInstitutionId))
+        return
+      }
+
+      if (!editorTarget) {
+        throw new Error('Nessun istituto selezionato')
+      }
 
       if (editorTarget.presetKey) {
         await upsertPresetInstitutionOverride({
@@ -584,7 +653,7 @@ function PortfolioWorkspace({
         logoOffsetX: parsedOffsetX,
         logoOffsetY: parsedOffsetY,
       })
-    }, 'Istituto aggiornato')
+    }, successMessage)
   }
 
   function handleResetEditorPreset(): void {
@@ -928,6 +997,44 @@ function PortfolioWorkspace({
     }, 'CSV esportato')
   }
 
+  async function handleLogoFileInput(
+    event: ChangeEvent<HTMLInputElement>,
+    onLoaded: (dataUrl: string) => void,
+  ): Promise<void> {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setFeedback({
+        kind: 'error',
+        message: 'Seleziona un file immagine valido',
+      })
+      return
+    }
+
+    if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+      setFeedback({
+        kind: 'error',
+        message: 'Il file logo deve essere massimo 2 MB',
+      })
+      return
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      onLoaded(dataUrl)
+    } catch {
+      setFeedback({
+        kind: 'error',
+        message: 'Errore durante il caricamento del file logo',
+      })
+    }
+  }
+
   const editorPreviewScale = Number.isFinite(Number(editorScale))
     ? Number(editorScale)
     : DEFAULT_LOGO_SCALE
@@ -940,15 +1047,14 @@ function PortfolioWorkspace({
   const editorPreviewIconMode: Institution['icon_mode'] = editorLogoUrl.trim()
     ? 'custom'
     : 'predefined'
-
-  const editorPreviewInstitution = editorTarget
-    ? {
-        name: editorName.trim() || editorTarget.defaultName,
-        icon_key: editorTarget.presetKey,
-        icon_mode: editorPreviewIconMode,
-        icon_url: editorLogoUrl.trim() || null,
-      }
-    : null
+  const editorPreviewName =
+    editorName.trim() || editorTarget?.defaultName || 'Nuovo istituto'
+  const editorPreviewInstitution = {
+    name: editorPreviewName,
+    icon_key: editorTarget?.presetKey ?? null,
+    icon_mode: editorPreviewIconMode,
+    icon_url: editorLogoUrl.trim() || null,
+  }
 
   if (loading) {
     return <LoadingScreen label="Caricamento patrimonio..." />
@@ -979,29 +1085,37 @@ function PortfolioWorkspace({
           type="button"
           className={activePage === 'dashboard' ? 'active' : ''}
           onClick={() => switchPage('dashboard')}
+          title="Dashboard"
+          aria-label="Dashboard"
         >
-          Dashboard
+          <House className="page-nav-icon" aria-hidden="true" />
         </button>
         <button
           type="button"
           className={activePage === 'accounts' ? 'active' : ''}
           onClick={() => switchPage('accounts')}
+          title="Conti"
+          aria-label="Conti"
         >
-          Conti
+          <Wallet className="page-nav-icon" aria-hidden="true" />
         </button>
         <button
           type="button"
           className={activePage === 'investments' ? 'active' : ''}
           onClick={() => switchPage('investments')}
+          title="Investimenti"
+          aria-label="Investimenti"
         >
-          Investimenti
+          <TrendingUp className="page-nav-icon" aria-hidden="true" />
         </button>
         <button
           type="button"
           className={activePage === 'settings' ? 'active' : ''}
           onClick={() => switchPage('settings')}
+          title="Impostazioni"
+          aria-label="Impostazioni"
         >
-          Impostazioni
+          <Settings className="page-nav-icon" aria-hidden="true" />
         </button>
       </nav>
 
@@ -1036,11 +1150,16 @@ function PortfolioWorkspace({
             trendData={trendData}
             allocationData={allocationData}
             institutionData={institutionData}
+            goalTargets={goalTargets}
           />
         </>
       ) : null}
 
-      <section className="grid forms-grid">
+      <section
+        className={`grid forms-grid ${
+          activePage === 'dashboard' ? '' : 'forms-grid-stacked'
+        }`}
+      >
         {activePage === 'settings' ? (
           <>
             <article className="panel">
@@ -1048,138 +1167,147 @@ function PortfolioWorkspace({
               <p className="muted">
                 Modifica nome, logo e inquadratura per preset e istituti personalizzati.
               </p>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setShowInstitutionTools((current) => !current)}
-              >
-                {showInstitutionTools
-                  ? 'Nascondi strumenti avanzati'
-                  : 'Mostra strumenti avanzati'}
-              </button>
-
-              {showInstitutionTools ? (
-                <>
-                  <div className="stack">
-                    <p className="muted">Seleziona l’istituto da modificare</p>
-                    <div className="institution-picker-grid">
-                      {editorTargets.map((target) => (
-                        <button
-                          key={target.key}
-                          type="button"
-                          className={`institution-tile ${
-                            editorTarget?.key === target.key ? 'active' : ''
-                          }`}
-                          onClick={() => selectEditorTarget(target)}
-                          title={target.institution.name}
-                        >
-                          <InstitutionAvatar
-                            name={target.institution.name}
-                            iconCandidates={resolveInstitutionLogoCandidates(target.institution)}
-                            logoScale={target.institution.logo_scale}
-                            logoOffsetX={target.institution.logo_offset_x}
-                            logoOffsetY={target.institution.logo_offset_y}
-                            size={40}
-                          />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <form className="stack" onSubmit={handleSaveInstitutionEditor}>
-                    <label className="stack">
-                      Nome istituto
-                      <input
-                        type="text"
-                        value={editorName}
-                        onChange={(event) => setEditorName(event.target.value)}
-                        placeholder="Es. Intesa Sanpaolo"
+              <div className="stack">
+                <p className="muted">
+                  Seleziona l’istituto da modificare oppure usa + per crearne uno personalizzato.
+                </p>
+                <div className="institution-picker-grid">
+                  {editorTargets.map((target) => (
+                    <button
+                      key={target.key}
+                      type="button"
+                      className={`institution-tile ${
+                        editorTarget?.key === target.key ? 'active' : ''
+                      }`}
+                      onClick={() => selectEditorTarget(target)}
+                      title={target.institution.name}
+                    >
+                      <InstitutionAvatar
+                        name={target.institution.name}
+                        iconCandidates={resolveInstitutionLogoCandidates(target.institution)}
+                        logoScale={target.institution.logo_scale}
+                        logoOffsetX={target.institution.logo_offset_x}
+                        logoOffsetY={target.institution.logo_offset_y}
+                        size={40}
                       />
-                    </label>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className={`institution-tile institution-tile-plus ${
+                      isNewCustomEditor ? 'active' : ''
+                    }`}
+                    title="Nuovo istituto personalizzato"
+                    onClick={startNewCustomInstitutionEditor}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
 
-                    <label className="stack">
-                      URL logo custom (opzionale)
-                      <input
-                        type="url"
-                        value={editorLogoUrl}
-                        onChange={(event) => setEditorLogoUrl(event.target.value)}
-                        placeholder="https://..."
-                      />
-                    </label>
+              <form className="stack" onSubmit={handleSaveInstitutionEditor}>
+                <label className="stack">
+                  Nome istituto
+                  <input
+                    type="text"
+                    value={editorName}
+                    onChange={(event) => setEditorName(event.target.value)}
+                    placeholder="Es. Intesa Sanpaolo"
+                  />
+                </label>
 
-                    <label className="stack">
-                      Zoom logo ({editorScale})
-                      <input
-                        type="range"
-                        min="0.6"
-                        max="2.4"
-                        step="0.05"
-                        value={editorScale}
-                        onChange={(event) => setEditorScale(event.target.value)}
-                      />
-                    </label>
+                <label className="stack">
+                  URL logo custom (opzionale)
+                  <input
+                    type="url"
+                    value={editorLogoUrl}
+                    onChange={(event) => setEditorLogoUrl(event.target.value)}
+                    placeholder="https://..."
+                  />
+                </label>
 
-                    <label className="stack">
-                      Offset X ({editorOffsetX}px)
-                      <input
-                        type="range"
-                        min="-40"
-                        max="40"
-                        step="1"
-                        value={editorOffsetX}
-                        onChange={(event) => setEditorOffsetX(event.target.value)}
-                      />
-                    </label>
+                <label className="stack">
+                  Carica logo da file (opzionale)
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      void handleLogoFileInput(event, (dataUrl) => setEditorLogoUrl(dataUrl))
+                    }
+                  />
+                </label>
 
-                    <label className="stack">
-                      Offset Y ({editorOffsetY}px)
-                      <input
-                        type="range"
-                        min="-40"
-                        max="40"
-                        step="1"
-                        value={editorOffsetY}
-                        onChange={(event) => setEditorOffsetY(event.target.value)}
-                      />
-                    </label>
+                <label className="stack">
+                  Zoom logo ({editorScale})
+                  <input
+                    type="range"
+                    min="0.6"
+                    max="2.4"
+                    step="0.05"
+                    value={editorScale}
+                    onChange={(event) => setEditorScale(event.target.value)}
+                  />
+                </label>
 
-                    <div className="institution-editor-preview">
-                      {editorPreviewInstitution ? (
-                        <InstitutionAvatar
-                          name={editorPreviewInstitution.name}
-                          iconCandidates={resolveInstitutionLogoCandidates(
-                            editorPreviewInstitution,
-                          )}
-                          logoScale={editorPreviewScale}
-                          logoOffsetX={editorPreviewOffsetX}
-                          logoOffsetY={editorPreviewOffsetY}
-                          size={56}
-                        />
-                      ) : null}
-                      <p className="muted">
-                        Anteprima logo nel cerchio. Se il logo custom fallisce, resta il
-                        fallback.
-                      </p>
-                    </div>
+                <label className="stack">
+                  Offset X ({editorOffsetX}px)
+                  <input
+                    type="range"
+                    min="-40"
+                    max="40"
+                    step="1"
+                    value={editorOffsetX}
+                    onChange={(event) => setEditorOffsetX(event.target.value)}
+                  />
+                </label>
 
-                    <div className="actions-row">
-                      <button type="submit" disabled={offlineReadOnly || !editorTarget}>
-                        Salva istituto
-                      </button>
-                      {editorTarget?.presetKey ? (
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={offlineReadOnly}
-                          onClick={handleResetEditorPreset}
-                        >
-                          Reset preset
-                        </button>
-                      ) : null}
-                    </div>
-                  </form>
-                </>
-              ) : null}
+                <label className="stack">
+                  Offset Y ({editorOffsetY}px)
+                  <input
+                    type="range"
+                    min="-40"
+                    max="40"
+                    step="1"
+                    value={editorOffsetY}
+                    onChange={(event) => setEditorOffsetY(event.target.value)}
+                  />
+                </label>
+
+                <div className="institution-editor-preview">
+                  {editorPreviewInstitution ? (
+                    <InstitutionAvatar
+                      name={editorPreviewInstitution.name}
+                      iconCandidates={resolveInstitutionLogoCandidates(
+                        editorPreviewInstitution,
+                      )}
+                      logoScale={editorPreviewScale}
+                      logoOffsetX={editorPreviewOffsetX}
+                      logoOffsetY={editorPreviewOffsetY}
+                      size={56}
+                    />
+                  ) : null}
+                  <p className="muted">
+                    Anteprima logo nel cerchio. Se il logo custom fallisce, resta il
+                    fallback.
+                  </p>
+                </div>
+
+                <div className="actions-row">
+                  <button type="submit" disabled={offlineReadOnly}>
+                    {isNewCustomEditor ? 'Crea istituto' : 'Salva istituto'}
+                  </button>
+                  {editorTarget?.presetKey ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={offlineReadOnly}
+                      onClick={handleResetEditorPreset}
+                    >
+                      Reset preset
+                    </button>
+                  ) : null}
+                </div>
+              </form>
             </article>
 
             <article className="panel">
@@ -1448,6 +1576,18 @@ function PortfolioWorkspace({
                         placeholder="https://..."
                       />
                     </label>
+                    <label className="stack">
+                      Carica logo da file (opzionale)
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) =>
+                          void handleLogoFileInput(event, (dataUrl) =>
+                            setAccountCustomInstitutionLogoUrl(dataUrl),
+                          )
+                        }
+                      />
+                    </label>
                   </>
                 ) : null}
 
@@ -1462,7 +1602,12 @@ function PortfolioWorkspace({
                   ) : null}
                 </div>
               </form>
+            </article>
 
+            <article className="panel panel-wide">
+              <h2>
+                {activePage === 'accounts' ? 'Elenco conti aperti' : 'Elenco investimenti'}
+              </h2>
               <div className="list">
                 {accountPageAccounts.map((account) => {
                   const institution = institutionById.get(account.institution_id)
@@ -1496,15 +1641,17 @@ function PortfolioWorkspace({
                       <div className="inline-actions">
                         <button
                           type="button"
-                          className="ghost"
+                          className="ghost icon-button"
                           disabled={offlineReadOnly}
                           onClick={() => beginAccountEdit(account.id)}
+                          title={`Modifica ${account.name}`}
+                          aria-label={`Modifica ${account.name}`}
                         >
-                          Modifica
+                          <Pencil className="action-icon" aria-hidden="true" />
                         </button>
                         <button
                           type="button"
-                          className="ghost"
+                          className="ghost icon-button"
                           disabled={offlineReadOnly}
                           onClick={() =>
                             void runAction(
@@ -1512,8 +1659,14 @@ function PortfolioWorkspace({
                               account.is_archived ? 'Conto riattivato' : 'Conto archiviato',
                             )
                           }
+                          title={account.is_archived ? `Riattiva ${account.name}` : `Archivia ${account.name}`}
+                          aria-label={account.is_archived ? `Riattiva ${account.name}` : `Archivia ${account.name}`}
                         >
-                          {account.is_archived ? 'Riattiva' : 'Archivia'}
+                          {account.is_archived ? (
+                            <RotateCcw className="action-icon" aria-hidden="true" />
+                          ) : (
+                            <Archive className="action-icon" aria-hidden="true" />
+                          )}
                         </button>
                       </div>
                     </div>

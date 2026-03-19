@@ -30,6 +30,16 @@ interface UsePortfolioDataResult {
   error: string | null
   offlineReadOnly: boolean
   refresh: () => Promise<void>
+  createInstitution: (input: {
+    name: string
+    kind: InstitutionKind
+    iconMode: InstitutionIcon
+    iconKey?: string | null
+    iconUrl?: string | null
+    logoScale: number
+    logoOffsetX: number
+    logoOffsetY: number
+  }) => Promise<string>
   updateInstitution: (input: {
     institutionId: string
     name: string
@@ -240,6 +250,112 @@ export function usePortfolioData(
       throw new Error('Utente non autenticato')
     }
   }, [isOnline, userId])
+
+  const createInstitution = useCallback(
+    async (input: {
+      name: string
+      kind: InstitutionKind
+      iconMode: InstitutionIcon
+      iconKey?: string | null
+      iconUrl?: string | null
+      logoScale: number
+      logoOffsetX: number
+      logoOffsetY: number
+    }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+      const institutionName = input.name.trim()
+
+      if (!institutionName) {
+        throw new Error('Nome istituto non valido')
+      }
+
+      const style = normalizeLogoStyle(
+        input.logoScale,
+        input.logoOffsetX,
+        input.logoOffsetY,
+      )
+
+      const insertPayloadWithStyle = {
+        user_id: userId,
+        name: institutionName,
+        kind: input.kind,
+        icon_mode: input.iconMode,
+        icon_key: input.iconKey ?? null,
+        icon_url: input.iconUrl?.trim() || null,
+        logo_scale: style.logoScale,
+        logo_offset_x: style.logoOffsetX,
+        logo_offset_y: style.logoOffsetY,
+      }
+      const insertPayloadLegacy = {
+        user_id: userId,
+        name: institutionName,
+        kind: input.kind,
+        icon_mode: input.iconMode,
+        icon_key: input.iconKey ?? null,
+        icon_url: input.iconUrl?.trim() || null,
+      }
+
+      let createdInstitution: { id: string } | null = null
+      let createInstitutionError: { code?: string | null; message: string } | null = null
+
+      const withStyleResult = await supabase
+        .from('institutions')
+        .insert(insertPayloadWithStyle)
+        .select('id')
+        .maybeSingle()
+
+      createdInstitution = withStyleResult.data
+      createInstitutionError = withStyleResult.error
+
+      if (
+        createInstitutionError &&
+        isMissingLogoStyleColumnsError(createInstitutionError)
+      ) {
+        const fallbackResult = await supabase
+          .from('institutions')
+          .insert(insertPayloadLegacy)
+          .select('id')
+          .maybeSingle()
+
+        createdInstitution = fallbackResult.data
+        createInstitutionError = fallbackResult.error
+      }
+
+      if (createInstitutionError && createInstitutionError.code !== '23505') {
+        throw new Error(createInstitutionError.message)
+      }
+
+      const institutionId = createdInstitution?.id
+
+      if (!institutionId) {
+        const { data: existingRows, error: lookupError } = await supabase
+          .from('institutions')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('name', institutionName)
+          .order('created_at', { ascending: true })
+          .limit(1)
+
+        if (lookupError) {
+          throw new Error(lookupError.message)
+        }
+
+        const existingInstitutionId = existingRows?.[0]?.id
+
+        if (!existingInstitutionId) {
+          throw new Error('Non è stato possibile creare l’istituto')
+        }
+
+        await refresh()
+        return existingInstitutionId
+      }
+
+      await refresh()
+      return institutionId
+    },
+    [ensureWritable, refresh, userId],
+  )
 
   const updateInstitution = useCallback(
     async (input: {
@@ -1097,6 +1213,7 @@ export function usePortfolioData(
     error,
     offlineReadOnly: !isOnline,
     refresh,
+    createInstitution,
     updateInstitution,
     upsertPresetInstitutionOverride,
     createAccount,

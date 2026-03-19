@@ -6,6 +6,7 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,11 +14,13 @@ import {
 } from 'recharts'
 import { formatCurrency } from '../lib/format'
 import type { TrendPoint } from '../lib/calculations'
+import type { GoalCategory } from '../types'
 
 interface PortfolioChartsProps {
   trendData: TrendPoint[]
   allocationData: Array<{ name: string; value: number }>
   institutionData: Array<{ name: string; value: number; color?: string }>
+  goalTargets: Partial<Record<GoalCategory, number>>
 }
 
 const PIE_COLORS = ['#2f4858', '#33658a', '#86bbd8', '#f6ae2d']
@@ -38,7 +41,36 @@ export function PortfolioCharts({
   trendData,
   allocationData,
   institutionData,
+  goalTargets,
 }: PortfolioChartsProps) {
+  const trendGoalLines = [
+    {
+      key: 'total',
+      value: goalTargets.total,
+      label: 'Obiettivo totale',
+      stroke: '#1f2937',
+    },
+    {
+      key: 'bank',
+      value: goalTargets.bank,
+      label: 'Obiettivo conti',
+      stroke: '#1d4ed8',
+    },
+    {
+      key: 'investment',
+      value: goalTargets.investment,
+      label: 'Obiettivo investimenti',
+      stroke: '#f97316',
+    },
+  ].filter(
+    (goalLine): goalLine is {
+      key: string
+      value: number
+      label: string
+      stroke: string
+    } => Number.isFinite(goalLine.value),
+  )
+
   return (
     <section className="grid charts">
       <article className="panel panel-chart">
@@ -54,6 +86,21 @@ export function PortfolioCharts({
               <YAxis tickFormatter={(value) => `${Math.round(value / 1000)}k`} />
               <Tooltip formatter={(value) => formatCurrency(Number(value))} />
               <Legend />
+              {trendGoalLines.map((goalLine) => (
+                <ReferenceLine
+                  key={goalLine.key}
+                  y={goalLine.value}
+                  stroke={goalLine.stroke}
+                  strokeDasharray="6 4"
+                  ifOverflow="extendDomain"
+                  label={{
+                    value: goalLine.label,
+                    position: 'insideTopRight',
+                    fill: goalLine.stroke,
+                    fontSize: 11,
+                  }}
+                />
+              ))}
               <Line
                 type="monotone"
                 dataKey="total"

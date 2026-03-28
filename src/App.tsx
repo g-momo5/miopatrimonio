@@ -6,6 +6,7 @@ import {
   Pencil,
   RotateCcw,
   Settings,
+  Trash2,
   TrendingUp,
   Wallet,
 } from 'lucide-react'
@@ -62,6 +63,16 @@ const DEFAULT_LOGO_OFFSET = 0
 const NEW_CUSTOM_CHOICE = 'new-custom'
 const NEW_CUSTOM_EDITOR_TARGET = 'editor:new-custom'
 const MAX_LOGO_FILE_SIZE_BYTES = 2 * 1024 * 1024
+const DEFAULT_INVESTMENT_INSTITUTION = {
+  name: 'Investimenti',
+  kind: 'broker' as const,
+  iconMode: 'predefined' as const,
+  iconKey: null,
+  iconUrl: null,
+  logoScale: DEFAULT_LOGO_SCALE,
+  logoOffsetX: DEFAULT_LOGO_OFFSET,
+  logoOffsetY: DEFAULT_LOGO_OFFSET,
+}
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -186,6 +197,7 @@ function PortfolioWorkspace({
     upsertPresetInstitutionOverride,
     createAccount,
     updateAccount,
+    deleteAccount,
     toggleArchiveAccount,
     addOrUpdateSnapshot,
     deleteSnapshot,
@@ -689,65 +701,69 @@ function PortfolioWorkspace({
         logoOffsetY: number
       }
 
-      if (accountInstitutionChoice === NEW_CUSTOM_CHOICE) {
-        if (!accountCustomInstitutionName.trim()) {
-          throw new Error('Inserisci il nome dell’istituto personalizzato')
-        }
-
-        institutionInput = {
-          name: accountCustomInstitutionName.trim(),
-          kind: accountType === 'investment' ? 'broker' : 'bank',
-          iconMode: accountCustomInstitutionLogoUrl.trim() ? 'custom' : 'predefined',
-          iconKey: null,
-          iconUrl: accountCustomInstitutionLogoUrl.trim() || null,
-          logoScale: DEFAULT_LOGO_SCALE,
-          logoOffsetX: DEFAULT_LOGO_OFFSET,
-          logoOffsetY: DEFAULT_LOGO_OFFSET,
-        }
+      if (accountType === 'investment') {
+        institutionInput = DEFAULT_INVESTMENT_INSTITUTION
       } else {
-        const selectedPresetKey = getPresetKeyFromChoice(accountInstitutionChoice)
-
-        if (selectedPresetKey) {
-          const selectedPresetItem = presetChooserItems.find(
-            (presetItem) => presetItem.preset.key === selectedPresetKey,
-          )
-
-          if (!selectedPresetItem) {
-            throw new Error('Istituto predefinito non valido')
+        if (accountInstitutionChoice === NEW_CUSTOM_CHOICE) {
+          if (!accountCustomInstitutionName.trim()) {
+            throw new Error('Inserisci il nome dell’istituto personalizzato')
           }
 
           institutionInput = {
-            name: selectedPresetItem.name,
-            kind: selectedPresetItem.preset.kind,
-            iconMode: selectedPresetItem.override?.icon_mode ?? 'predefined',
-            iconKey: selectedPresetItem.preset.key,
-            iconUrl: selectedPresetItem.override?.icon_url ?? null,
-            logoScale:
-              selectedPresetItem.override?.logo_scale ?? DEFAULT_LOGO_SCALE,
-            logoOffsetX:
-              selectedPresetItem.override?.logo_offset_x ?? DEFAULT_LOGO_OFFSET,
-            logoOffsetY:
-              selectedPresetItem.override?.logo_offset_y ?? DEFAULT_LOGO_OFFSET,
+            name: accountCustomInstitutionName.trim(),
+            kind: 'bank',
+            iconMode: accountCustomInstitutionLogoUrl.trim() ? 'custom' : 'predefined',
+            iconKey: null,
+            iconUrl: accountCustomInstitutionLogoUrl.trim() || null,
+            logoScale: DEFAULT_LOGO_SCALE,
+            logoOffsetX: DEFAULT_LOGO_OFFSET,
+            logoOffsetY: DEFAULT_LOGO_OFFSET,
           }
         } else {
-          const selectedCustomId = getInstitutionIdFromChoice(accountInstitutionChoice)
-          const selectedCustomInstitution = selectedCustomId
-            ? institutionById.get(selectedCustomId)
-            : null
+          const selectedPresetKey = getPresetKeyFromChoice(accountInstitutionChoice)
 
-          if (!selectedCustomInstitution) {
-            throw new Error('Istituto personalizzato non valido')
-          }
+          if (selectedPresetKey) {
+            const selectedPresetItem = presetChooserItems.find(
+              (presetItem) => presetItem.preset.key === selectedPresetKey,
+            )
 
-          institutionInput = {
-            name: selectedCustomInstitution.name,
-            kind: selectedCustomInstitution.kind,
-            iconMode: selectedCustomInstitution.icon_mode,
-            iconKey: selectedCustomInstitution.icon_key,
-            iconUrl: selectedCustomInstitution.icon_url,
-            logoScale: selectedCustomInstitution.logo_scale,
-            logoOffsetX: selectedCustomInstitution.logo_offset_x,
-            logoOffsetY: selectedCustomInstitution.logo_offset_y,
+            if (!selectedPresetItem) {
+              throw new Error('Istituto predefinito non valido')
+            }
+
+            institutionInput = {
+              name: selectedPresetItem.name,
+              kind: selectedPresetItem.preset.kind,
+              iconMode: selectedPresetItem.override?.icon_mode ?? 'predefined',
+              iconKey: selectedPresetItem.preset.key,
+              iconUrl: selectedPresetItem.override?.icon_url ?? null,
+              logoScale:
+                selectedPresetItem.override?.logo_scale ?? DEFAULT_LOGO_SCALE,
+              logoOffsetX:
+                selectedPresetItem.override?.logo_offset_x ?? DEFAULT_LOGO_OFFSET,
+              logoOffsetY:
+                selectedPresetItem.override?.logo_offset_y ?? DEFAULT_LOGO_OFFSET,
+            }
+          } else {
+            const selectedCustomId = getInstitutionIdFromChoice(accountInstitutionChoice)
+            const selectedCustomInstitution = selectedCustomId
+              ? institutionById.get(selectedCustomId)
+              : null
+
+            if (!selectedCustomInstitution) {
+              throw new Error('Istituto personalizzato non valido')
+            }
+
+            institutionInput = {
+              name: selectedCustomInstitution.name,
+              kind: selectedCustomInstitution.kind,
+              iconMode: selectedCustomInstitution.icon_mode,
+              iconKey: selectedCustomInstitution.icon_key,
+              iconUrl: selectedCustomInstitution.icon_url,
+              logoScale: selectedCustomInstitution.logo_scale,
+              logoOffsetX: selectedCustomInstitution.logo_offset_x,
+              logoOffsetY: selectedCustomInstitution.logo_offset_y,
+            }
           }
         }
       }
@@ -784,17 +800,22 @@ function PortfolioWorkspace({
       return
     }
 
-    const institution = institutionById.get(account.institution_id)
-    if (!institution) {
-      return
-    }
-
     setEditingAccountId(account.id)
     setAccountName(account.name)
     setAccountType(account.account_type)
     setShowAccountInstitutionChooser(false)
     setAccountCustomInstitutionName('')
     setAccountCustomInstitutionLogoUrl('')
+
+    if (account.account_type === 'investment') {
+      setAccountInstitutionChoice(presetChoice(PRESET_INSTITUTIONS[0].key))
+      return
+    }
+
+    const institution = institutionById.get(account.institution_id)
+    if (!institution) {
+      return
+    }
 
     if (institution.icon_key && getPresetInstitutionByKey(institution.icon_key)) {
       setAccountInstitutionChoice(presetChoice(institution.icon_key))
@@ -898,6 +919,38 @@ function PortfolioWorkspace({
     setSnapshotDate(TODAY)
     setSnapshotValue('')
     setSnapshotNote('')
+  }
+
+  async function handleDeleteAccount(accountId: string): Promise<void> {
+    const account = accountById.get(accountId)
+
+    if (!account) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Eliminare "${account.name}"? Questa azione rimuove anche snapshot e posizioni collegate.`,
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    await runAction(async () => {
+      await deleteAccount(account.id)
+
+      if (editingAccountId === account.id) {
+        resetAccountForm()
+      }
+
+      if (snapshotAccountId === account.id) {
+        resetSnapshotForm()
+      }
+
+      if (positionAccountId === account.id) {
+        resetPositionForm()
+      }
+    }, 'Conto eliminato')
   }
 
   async function handleSubmitPosition(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -1445,151 +1498,159 @@ function PortfolioWorkspace({
                   </label>
                 )}
 
-                <div className="stack">
-                  <label>Istituto</label>
-                  <button
-                    type="button"
-                    className="institution-trigger"
-                    onClick={() => setShowAccountInstitutionChooser((current) => !current)}
-                  >
-                    {selectedAccountInstitution ? (
-                      <>
-                        <InstitutionAvatar
-                          name={selectedAccountInstitution.name}
-                          iconCandidates={resolveInstitutionLogoCandidates(
-                            selectedAccountInstitution.institutionForAvatar,
-                          )}
-                          logoScale={selectedAccountInstitution.institutionForAvatar.logo_scale}
-                          logoOffsetX={
-                            selectedAccountInstitution.institutionForAvatar.logo_offset_x
-                          }
-                          logoOffsetY={
-                            selectedAccountInstitution.institutionForAvatar.logo_offset_y
-                          }
-                          size={32}
-                        />
-                        <span>{selectedAccountInstitution.name}</span>
-                      </>
-                    ) : (
-                      <span>Istituto personalizzato</span>
-                    )}
-                  </button>
-
-                  {showAccountInstitutionChooser ? (
-                    <>
-                      <div className="institution-picker-grid">
-                        {presetChooserItems.map((item) => (
-                          <button
-                            key={item.choice}
-                            type="button"
-                            className={`institution-tile ${
-                              accountInstitutionChoice === item.choice ? 'active' : ''
-                            }`}
-                            title={item.name}
-                            onClick={() => {
-                              setAccountInstitutionChoice(item.choice)
-                              setShowAccountInstitutionChooser(false)
-                            }}
-                          >
+                {accountType === 'bank' ? (
+                  <>
+                    <div className="stack">
+                      <label>Istituto</label>
+                      <button
+                        type="button"
+                        className="institution-trigger"
+                        onClick={() => setShowAccountInstitutionChooser((current) => !current)}
+                      >
+                        {selectedAccountInstitution ? (
+                          <>
                             <InstitutionAvatar
-                              name={item.name}
+                              name={selectedAccountInstitution.name}
                               iconCandidates={resolveInstitutionLogoCandidates(
-                                item.institutionForAvatar,
+                                selectedAccountInstitution.institutionForAvatar,
                               )}
-                              logoScale={item.institutionForAvatar.logo_scale}
-                              logoOffsetX={item.institutionForAvatar.logo_offset_x}
-                              logoOffsetY={item.institutionForAvatar.logo_offset_y}
-                              size={40}
+                              logoScale={selectedAccountInstitution.institutionForAvatar.logo_scale}
+                              logoOffsetX={
+                                selectedAccountInstitution.institutionForAvatar.logo_offset_x
+                              }
+                              logoOffsetY={
+                                selectedAccountInstitution.institutionForAvatar.logo_offset_y
+                              }
+                              size={32}
                             />
-                          </button>
-                        ))}
+                            <span>{selectedAccountInstitution.name}</span>
+                          </>
+                        ) : (
+                          <span>Istituto personalizzato</span>
+                        )}
+                      </button>
 
-                        {customInstitutions.map((institution) => {
-                          const choice = customChoice(institution.id)
-                          return (
+                      {showAccountInstitutionChooser ? (
+                        <>
+                          <div className="institution-picker-grid">
+                            {presetChooserItems.map((item) => (
+                              <button
+                                key={item.choice}
+                                type="button"
+                                className={`institution-tile ${
+                                  accountInstitutionChoice === item.choice ? 'active' : ''
+                                }`}
+                                title={item.name}
+                                onClick={() => {
+                                  setAccountInstitutionChoice(item.choice)
+                                  setShowAccountInstitutionChooser(false)
+                                }}
+                              >
+                                <InstitutionAvatar
+                                  name={item.name}
+                                  iconCandidates={resolveInstitutionLogoCandidates(
+                                    item.institutionForAvatar,
+                                  )}
+                                  logoScale={item.institutionForAvatar.logo_scale}
+                                  logoOffsetX={item.institutionForAvatar.logo_offset_x}
+                                  logoOffsetY={item.institutionForAvatar.logo_offset_y}
+                                  size={40}
+                                />
+                              </button>
+                            ))}
+
+                            {customInstitutions.map((institution) => {
+                              const choice = customChoice(institution.id)
+                              return (
+                                <button
+                                  key={institution.id}
+                                  type="button"
+                                  className={`institution-tile ${
+                                    accountInstitutionChoice === choice ? 'active' : ''
+                                  }`}
+                                  title={institution.name}
+                                  onClick={() => {
+                                    setAccountInstitutionChoice(choice)
+                                    setShowAccountInstitutionChooser(false)
+                                  }}
+                                >
+                                  <InstitutionAvatar
+                                    name={institution.name}
+                                    iconCandidates={resolveInstitutionLogoCandidates(institution)}
+                                    logoScale={institution.logo_scale}
+                                    logoOffsetX={institution.logo_offset_x}
+                                    logoOffsetY={institution.logo_offset_y}
+                                    size={40}
+                                  />
+                                </button>
+                              )
+                            })}
+
                             <button
-                              key={institution.id}
                               type="button"
-                              className={`institution-tile ${
-                                accountInstitutionChoice === choice ? 'active' : ''
+                              className={`institution-tile institution-tile-plus ${
+                                accountInstitutionChoice === NEW_CUSTOM_CHOICE ? 'active' : ''
                               }`}
-                              title={institution.name}
+                              title="Nuovo istituto personalizzato"
                               onClick={() => {
-                                setAccountInstitutionChoice(choice)
+                                setAccountInstitutionChoice(NEW_CUSTOM_CHOICE)
                                 setShowAccountInstitutionChooser(false)
                               }}
                             >
-                              <InstitutionAvatar
-                                name={institution.name}
-                                iconCandidates={resolveInstitutionLogoCandidates(institution)}
-                                logoScale={institution.logo_scale}
-                                logoOffsetX={institution.logo_offset_x}
-                                logoOffsetY={institution.logo_offset_y}
-                                size={40}
-                              />
+                              +
                             </button>
-                          )
-                        })}
+                          </div>
+                          <p className="muted">
+                            Scegli il logo istituto o usa + per creare un istituto personalizzato.
+                          </p>
+                        </>
+                      ) : null}
+                    </div>
 
-                        <button
-                          type="button"
-                          className={`institution-tile institution-tile-plus ${
-                            accountInstitutionChoice === NEW_CUSTOM_CHOICE ? 'active' : ''
-                          }`}
-                          title="Nuovo istituto personalizzato"
-                          onClick={() => {
-                            setAccountInstitutionChoice(NEW_CUSTOM_CHOICE)
-                            setShowAccountInstitutionChooser(false)
-                          }}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <p className="muted">
-                        Scegli il logo istituto o usa + per creare un istituto personalizzato.
-                      </p>
-                    </>
-                  ) : null}
-                </div>
-
-                {accountInstitutionChoice === NEW_CUSTOM_CHOICE ? (
-                  <>
-                    <label className="stack">
-                      Nome istituto personalizzato
-                      <input
-                        type="text"
-                        value={accountCustomInstitutionName}
-                        onChange={(event) =>
-                          setAccountCustomInstitutionName(event.target.value)
-                        }
-                        placeholder="Es. Banca locale"
-                      />
-                    </label>
-                    <label className="stack">
-                      URL logo (opzionale)
-                      <input
-                        type="url"
-                        value={accountCustomInstitutionLogoUrl}
-                        onChange={(event) =>
-                          setAccountCustomInstitutionLogoUrl(event.target.value)
-                        }
-                        placeholder="https://..."
-                      />
-                    </label>
-                    <label className="stack">
-                      Carica logo da file (opzionale)
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) =>
-                          void handleLogoFileInput(event, (dataUrl) =>
-                            setAccountCustomInstitutionLogoUrl(dataUrl),
-                          )
-                        }
-                      />
-                    </label>
+                    {accountInstitutionChoice === NEW_CUSTOM_CHOICE ? (
+                      <>
+                        <label className="stack">
+                          Nome istituto personalizzato
+                          <input
+                            type="text"
+                            value={accountCustomInstitutionName}
+                            onChange={(event) =>
+                              setAccountCustomInstitutionName(event.target.value)
+                            }
+                            placeholder="Es. Banca locale"
+                          />
+                        </label>
+                        <label className="stack">
+                          URL logo (opzionale)
+                          <input
+                            type="url"
+                            value={accountCustomInstitutionLogoUrl}
+                            onChange={(event) =>
+                              setAccountCustomInstitutionLogoUrl(event.target.value)
+                            }
+                            placeholder="https://..."
+                          />
+                        </label>
+                        <label className="stack">
+                          Carica logo da file (opzionale)
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) =>
+                              void handleLogoFileInput(event, (dataUrl) =>
+                                setAccountCustomInstitutionLogoUrl(dataUrl),
+                              )
+                            }
+                          />
+                        </label>
+                      </>
+                    ) : null}
                   </>
-                ) : null}
+                ) : (
+                  <p className="muted">
+                    Per gli investimenti l&apos;istituto viene assegnato automaticamente.
+                  </p>
+                )}
 
                 <div className="actions-row">
                   <button type="submit" disabled={offlineReadOnly}>
@@ -1628,8 +1689,9 @@ function PortfolioWorkspace({
                         <div>
                           <strong>{account.name}</strong>
                           <p className="muted">
-                            {account.account_type === 'bank' ? 'Conto' : 'Investimento'} ·{' '}
-                            {institution?.name ?? 'Istituto sconosciuto'}
+                            {account.account_type === 'bank'
+                              ? `Conto · ${institution?.name ?? 'Istituto sconosciuto'}`
+                              : 'Investimento'}
                           </p>
                           <p className="amount-line">
                             Ultimo saldo:{' '}
@@ -1667,6 +1729,16 @@ function PortfolioWorkspace({
                           ) : (
                             <Archive className="action-icon" aria-hidden="true" />
                           )}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost danger icon-button"
+                          disabled={offlineReadOnly}
+                          onClick={() => void handleDeleteAccount(account.id)}
+                          title={`Elimina ${account.name}`}
+                          aria-label={`Elimina ${account.name}`}
+                        >
+                          <Trash2 className="action-icon" aria-hidden="true" />
                         </button>
                       </div>
                     </div>

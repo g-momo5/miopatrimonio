@@ -36,6 +36,43 @@ const INSTITUTION_COLORS = [
   '#a16207',
   '#4f46e5',
 ]
+const RADIAN = Math.PI / 180
+
+function renderPiePercentLabel({
+  cx,
+  cy,
+  midAngle,
+  outerRadius,
+  percent,
+}: {
+  cx?: number
+  cy?: number
+  midAngle?: number
+  outerRadius?: number
+  percent?: number
+}) {
+  const centerX = cx ?? 0
+  const centerY = cy ?? 0
+  const angle = midAngle ?? 0
+  const radius = (outerRadius ?? 0) + 6
+  const value = ((percent ?? 0) * 100).toFixed(0)
+  const x = centerX + radius * Math.cos(-angle * RADIAN)
+  const y = centerY + radius * Math.sin(-angle * RADIAN)
+
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor={x > centerX ? 'start' : 'end'}
+      dominantBaseline="central"
+      fill="#334155"
+      fontSize={15}
+      fontWeight={600}
+    >
+      {value}%
+    </text>
+  )
+}
 
 export function PortfolioCharts({
   trendData,
@@ -147,7 +184,7 @@ export function PortfolioCharts({
                 nameKey="name"
                 labelLine={false}
                 dataKey="value"
-                label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
+                label={renderPiePercentLabel}
               >
                 {allocationData.map((entry, index) => (
                   <Cell
@@ -180,7 +217,7 @@ export function PortfolioCharts({
                 dataKey="value"
                 nameKey="name"
                 labelLine={false}
-                label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`}
+                label={renderPiePercentLabel}
               >
                 {institutionData.map((entry, index) => (
                   <Cell

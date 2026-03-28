@@ -92,6 +92,7 @@ interface UsePortfolioDataResult {
       logoOffsetY: number
     }
   }) => Promise<void>
+  deleteAccount: (accountId: string) => Promise<void>
   toggleArchiveAccount: (accountId: string, isArchived: boolean) => Promise<void>
   addOrUpdateSnapshot: (input: {
     snapshotId?: string
@@ -797,6 +798,26 @@ export function usePortfolioData(
     [ensureWritable, refresh, userId],
   )
 
+  const deleteAccount = useCallback(
+    async (accountId: string) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+
+      const { error: deleteError } = await supabase
+        .from('accounts')
+        .delete()
+        .eq('id', accountId)
+        .eq('user_id', userId)
+
+      if (deleteError) {
+        throw new Error(deleteError.message)
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
   const addOrUpdateSnapshot = useCallback(
     async (input: {
       snapshotId?: string
@@ -1218,6 +1239,7 @@ export function usePortfolioData(
     upsertPresetInstitutionOverride,
     createAccount,
     updateAccount,
+    deleteAccount,
     toggleArchiveAccount,
     addOrUpdateSnapshot,
     deleteSnapshot,

@@ -1,8 +1,9 @@
-const CACHE_NAME = 'mio-patrimonio-v1'
+const CACHE_NAME = 'mio-patrimonio-v2'
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
+  '/favicon.ico',
   '/pwa-192.png',
   '/pwa-512.png',
   '/apple-touch-icon.png',

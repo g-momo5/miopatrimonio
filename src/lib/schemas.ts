@@ -38,6 +38,30 @@ const goalSchema = z.object({
   targetEur: z.number().nonnegative(),
 })
 
+const cashflowEntrySchema = z.object({
+  entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  entryType: z.enum(['income', 'invested']),
+  amountEur: z.number().nonnegative(),
+  note: z.string().nullable(),
+})
+
+const recurringTemplateSchema = z.object({
+  name: z.string().min(1),
+  entryType: z.enum(['income', 'invested']),
+  amountEur: z.number().nonnegative(),
+  dayOfMonth: z.number().int().min(1).max(31),
+  note: z.string().nullable(),
+  isActive: z.boolean(),
+})
+
+const recurringOccurrenceSchema = z.object({
+  templateName: z.string().min(1),
+  templateEntryType: z.enum(['income', 'invested']),
+  monthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  status: z.enum(['pending', 'confirmed', 'skipped']),
+})
+
 export const backupPayloadSchema = z.object({
   version: z.number().int().min(1),
   exportedAt: z.string(),
@@ -46,4 +70,7 @@ export const backupPayloadSchema = z.object({
   snapshots: z.array(snapshotSchema),
   positions: z.array(positionSchema),
   goals: z.array(goalSchema),
+  cashflowEntries: z.array(cashflowEntrySchema).optional().default([]),
+  recurringTemplates: z.array(recurringTemplateSchema).optional().default([]),
+  recurringOccurrences: z.array(recurringOccurrenceSchema).optional().default([]),
 })

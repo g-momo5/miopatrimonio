@@ -6,9 +6,12 @@ export function buildBackupPayload(state: PortfolioDataState): BackupPayload {
     state.institutions.map((institution) => [institution.id, institution]),
   )
   const accountById = new Map(state.accounts.map((account) => [account.id, account]))
+  const recurringTemplateById = new Map(
+    state.recurringTemplates.map((template) => [template.id, template]),
+  )
 
   return {
-    version: 1,
+    version: 3,
     exportedAt: new Date().toISOString(),
     institutions: state.institutions.map((institution) => ({
       name: institution.name,
@@ -44,6 +47,46 @@ export function buildBackupPayload(state: PortfolioDataState): BackupPayload {
       category: goal.category,
       targetEur: Number(goal.target_eur),
     })),
+    cashflowEntries: state.cashflowEntries.map((entry) => ({
+      entryDate: entry.entry_date,
+      entryType: entry.entry_type,
+      amountEur: Number(entry.amount_eur),
+      note: entry.note,
+    })),
+    recurringTemplates: state.recurringTemplates.map((template) => ({
+      name: template.name,
+      entryType: template.entry_type,
+      amountEur: Number(template.amount_eur),
+      dayOfMonth: Number(template.day_of_month),
+      note: template.note,
+      isActive: Boolean(template.is_active),
+    })),
+    recurringOccurrences: state.recurringOccurrences
+      .map((occurrence) => {
+        const template = recurringTemplateById.get(occurrence.template_id)
+        if (!template) {
+          return null
+        }
+
+        return {
+          templateName: template.name,
+          templateEntryType: template.entry_type,
+          monthDate: occurrence.month_date,
+          dueDate: occurrence.due_date,
+          status: occurrence.status,
+        }
+      })
+      .filter(
+        (
+          occurrence,
+        ): occurrence is {
+          templateName: string
+          templateEntryType: 'income' | 'invested'
+          monthDate: string
+          dueDate: string
+          status: 'pending' | 'confirmed' | 'skipped'
+        } => occurrence !== null,
+      ),
   }
 }
 

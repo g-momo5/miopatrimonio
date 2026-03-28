@@ -45,6 +45,45 @@ const state: PortfolioDataState = {
   ],
   positions: [],
   goals: [],
+  cashflowEntries: [
+    {
+      id: 'c1',
+      user_id: 'u1',
+      entry_date: '2026-01-10',
+      entry_type: 'income',
+      amount_eur: 1800,
+      note: 'stipendio',
+      created_at: '2026-01-10T00:00:00.000Z',
+      updated_at: '2026-01-10T00:00:00.000Z',
+    },
+  ],
+  recurringTemplates: [
+    {
+      id: 'rt1',
+      user_id: 'u1',
+      name: 'Stipendio',
+      entry_type: 'income',
+      amount_eur: 1800,
+      day_of_month: 27,
+      note: 'Ricorrente',
+      is_active: true,
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+  recurringOccurrences: [
+    {
+      id: 'ro1',
+      user_id: 'u1',
+      template_id: 'rt1',
+      month_date: '2026-01-01',
+      due_date: '2026-01-27',
+      status: 'confirmed',
+      confirmed_entry_id: 'c1',
+      created_at: '2026-01-27T00:00:00.000Z',
+      updated_at: '2026-01-27T00:00:00.000Z',
+    },
+  ],
 }
 
 describe('backup helpers', () => {
@@ -52,9 +91,12 @@ describe('backup helpers', () => {
     const payload = buildBackupPayload(state)
     const parsed = parseBackupPayload(payload)
 
-    expect(parsed.version).toBe(1)
+    expect(parsed.version).toBe(3)
     expect(parsed.accounts[0].institutionName).toBe('BBVA')
     expect(parsed.snapshots[0].valueEur).toBe(2400)
+    expect(parsed.cashflowEntries[0].entryType).toBe('income')
+    expect(parsed.recurringTemplates[0].name).toBe('Stipendio')
+    expect(parsed.recurringOccurrences[0].status).toBe('confirmed')
   })
 
   it('genera CSV con intestazione e righe snapshot', () => {
@@ -62,5 +104,21 @@ describe('backup helpers', () => {
 
     expect(csv).toContain('data,conto,tipo_conto,istituto,valore_eur,nota')
     expect(csv).toContain('2026-01-20,Conto BBVA,bank,BBVA,2400.00,stipendio')
+  })
+
+  it('supporta import backup legacy v1 senza cashflowEntries', () => {
+    const parsed = parseBackupPayload({
+      version: 1,
+      exportedAt: '2026-01-20T00:00:00.000Z',
+      institutions: [],
+      accounts: [],
+      snapshots: [],
+      positions: [],
+      goals: [],
+    })
+
+    expect(parsed.cashflowEntries).toEqual([])
+    expect(parsed.recurringTemplates).toEqual([])
+    expect(parsed.recurringOccurrences).toEqual([])
   })
 })

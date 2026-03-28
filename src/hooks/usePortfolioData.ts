@@ -5,12 +5,17 @@ import { parseBackupPayload } from '../lib/backup'
 import type {
   Account,
   AccountSnapshot,
+  CashflowEntryType,
+  CashflowRecurringOccurrence,
+  CashflowRecurringOccurrenceStatus,
+  CashflowRecurringTemplate,
   Goal,
   GoalCategory,
   Institution,
   InstitutionIcon,
   InstitutionKind,
   InvestmentPosition,
+  MonthlyCashflowEntry,
   PortfolioDataState,
 } from '../types'
 
@@ -22,6 +27,9 @@ const EMPTY_STATE: PortfolioDataState = {
   snapshots: [],
   positions: [],
   goals: [],
+  cashflowEntries: [],
+  recurringTemplates: [],
+  recurringOccurrences: [],
 }
 
 interface UsePortfolioDataResult {
@@ -112,6 +120,37 @@ interface UsePortfolioDataResult {
   deletePosition: (positionId: string) => Promise<void>
   addOrUpdateGoal: (input: { category: GoalCategory; targetEur: number }) => Promise<void>
   deleteGoal: (goalId: string) => Promise<void>
+  addOrUpdateCashflowEntry: (input: {
+    entryId?: string
+    entryDate: string
+    entryType: CashflowEntryType
+    amountEur: number
+    note?: string
+  }) => Promise<void>
+  deleteCashflowEntry: (entryId: string) => Promise<void>
+  addOrUpdateRecurringTemplate: (input: {
+    templateId?: string
+    name: string
+    entryType: CashflowEntryType
+    amountEur: number
+    dayOfMonth: number
+    note?: string
+    isActive: boolean
+  }) => Promise<void>
+  deleteRecurringTemplate: (templateId: string) => Promise<void>
+  confirmRecurringTemplateForMonth: (input: {
+    templateId: string
+    monthDate: string
+    dueDate: string
+    entryType: CashflowEntryType
+    amountEur: number
+    note?: string
+  }) => Promise<void>
+  skipRecurringTemplateForMonth: (input: {
+    templateId: string
+    monthDate: string
+    dueDate: string
+  }) => Promise<void>
   importBackup: (raw: unknown) => Promise<void>
 }
 
@@ -172,7 +211,16 @@ export function usePortfolioData(
     try {
       const supabase = getSupabaseOrThrow()
 
-      const [institutionsResult, accountsResult, snapshotsResult, positionsResult, goalsResult] =
+      const [
+        institutionsResult,
+        accountsResult,
+        snapshotsResult,
+        positionsResult,
+        goalsResult,
+        cashflowEntriesResult,
+        recurringTemplatesResult,
+        recurringOccurrencesResult,
+      ] =
         await Promise.all([
           supabase
             .from('institutions')
@@ -199,7 +247,33 @@ export function usePortfolioData(
             .select('*')
             .eq('user_id', userId)
             .order('category', { ascending: true }),
+          supabase
+            .from('monthly_cashflow_entries')
+            .select('*')
+            .eq('user_id', userId)
+            .order('entry_date', { ascending: false })
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('monthly_cashflow_recurring_templates')
+            .select('*')
+            .eq('user_id', userId)
+            .order('name', { ascending: true }),
+          supabase
+            .from('monthly_cashflow_recurring_occurrences')
+            .select('*')
+            .eq('user_id', userId)
+            .order('month_date', { ascending: false })
+            .order('created_at', { ascending: false }),
         ])
+      const missingCashflowTable = isMissingCashflowTableError(
+        cashflowEntriesResult.error,
+      )
+      const missingRecurringTemplatesTable = isMissingRecurringTemplatesTableError(
+        recurringTemplatesResult.error,
+      )
+      const missingRecurringOccurrencesTable = isMissingRecurringOccurrencesTableError(
+        recurringOccurrencesResult.error,
+      )
 
       const failures = [
         institutionsResult.error,
@@ -207,6 +281,9 @@ export function usePortfolioData(
         snapshotsResult.error,
         positionsResult.error,
         goalsResult.error,
+        missingCashflowTable ? null : cashflowEntriesResult.error,
+        missingRecurringTemplatesTable ? null : recurringTemplatesResult.error,
+        missingRecurringOccurrencesTable ? null : recurringOccurrencesResult.error,
       ].filter(Boolean)
 
       if (failures.length > 0) {
@@ -219,6 +296,11 @@ export function usePortfolioData(
         snapshots: snapshotsResult.data ?? [],
         positions: positionsResult.data ?? [],
         goals: goalsResult.data ?? [],
+        cashflowEntries: missingCashflowTable ? [] : cashflowEntriesResult.data ?? [],
+        recurringTemplates:
+          missingRecurringTemplatesTable ? [] : recurringTemplatesResult.data ?? [],
+        recurringOccurrences:
+          missingRecurringOccurrencesTable ? [] : recurringOccurrencesResult.data ?? [],
       })
 
       setData(nextState)
@@ -1005,6 +1087,239 @@ export function usePortfolioData(
     [ensureWritable, refresh, userId],
   )
 
+  const addOrUpdateCashflowEntry = useCallback(
+    async (input: {
+      entryId?: string
+      entryDate: string
+      entryType: CashflowEntryType
+      amountEur: number
+      note?: string
+    }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+
+      if (input.entryId) {
+        const { error: updateError } = await supabase
+          .from('monthly_cashflow_entries')
+          .update({
+            entry_date: input.entryDate,
+            entry_type: input.entryType,
+            amount_eur: input.amountEur,
+            note: input.note?.trim() ? input.note.trim() : null,
+          })
+          .eq('id', input.entryId)
+          .eq('user_id', userId)
+
+        if (updateError) {
+          throw new Error(updateError.message)
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from('monthly_cashflow_entries')
+          .insert({
+            user_id: userId,
+            entry_date: input.entryDate,
+            entry_type: input.entryType,
+            amount_eur: input.amountEur,
+            note: input.note?.trim() ? input.note.trim() : null,
+          })
+
+        if (insertError) {
+          throw new Error(insertError.message)
+        }
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
+  const deleteCashflowEntry = useCallback(
+    async (entryId: string) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+
+      const { error: deleteError } = await supabase
+        .from('monthly_cashflow_entries')
+        .delete()
+        .eq('id', entryId)
+        .eq('user_id', userId)
+
+      if (deleteError) {
+        throw new Error(deleteError.message)
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
+  const addOrUpdateRecurringTemplate = useCallback(
+    async (input: {
+      templateId?: string
+      name: string
+      entryType: CashflowEntryType
+      amountEur: number
+      dayOfMonth: number
+      note?: string
+      isActive: boolean
+    }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+      const normalizedName = input.name.trim()
+
+      if (!normalizedName) {
+        throw new Error('Inserisci il nome del template')
+      }
+
+      if (!Number.isFinite(input.amountEur) || input.amountEur < 0) {
+        throw new Error('Importo template non valido')
+      }
+
+      if (!Number.isInteger(input.dayOfMonth) || input.dayOfMonth < 1 || input.dayOfMonth > 31) {
+        throw new Error('Giorno mese non valido')
+      }
+
+      const payload = {
+        name: normalizedName,
+        entry_type: input.entryType,
+        amount_eur: input.amountEur,
+        day_of_month: input.dayOfMonth,
+        note: input.note?.trim() ? input.note.trim() : null,
+        is_active: input.isActive,
+      }
+
+      if (input.templateId) {
+        const { error: updateError } = await supabase
+          .from('monthly_cashflow_recurring_templates')
+          .update(payload)
+          .eq('id', input.templateId)
+          .eq('user_id', userId)
+
+        if (updateError) {
+          throw new Error(updateError.message)
+        }
+      } else {
+        const { error: insertError } = await supabase
+          .from('monthly_cashflow_recurring_templates')
+          .insert({
+            user_id: userId,
+            ...payload,
+          })
+
+        if (insertError) {
+          throw new Error(insertError.message)
+        }
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
+  const deleteRecurringTemplate = useCallback(
+    async (templateId: string) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+
+      const { error: deleteError } = await supabase
+        .from('monthly_cashflow_recurring_templates')
+        .delete()
+        .eq('id', templateId)
+        .eq('user_id', userId)
+
+      if (deleteError) {
+        throw new Error(deleteError.message)
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
+  const confirmRecurringTemplateForMonth = useCallback(
+    async (input: {
+      templateId: string
+      monthDate: string
+      dueDate: string
+      entryType: CashflowEntryType
+      amountEur: number
+      note?: string
+    }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+
+      const { data: insertedEntry, error: insertEntryError } = await supabase
+        .from('monthly_cashflow_entries')
+        .insert({
+          user_id: userId,
+          entry_date: input.dueDate,
+          entry_type: input.entryType,
+          amount_eur: input.amountEur,
+          note: input.note?.trim() ? input.note.trim() : null,
+        })
+        .select('id')
+        .single()
+
+      if (insertEntryError) {
+        throw new Error(insertEntryError.message)
+      }
+
+      const { error: occurrenceError } = await supabase
+        .from('monthly_cashflow_recurring_occurrences')
+        .upsert(
+          {
+            user_id: userId,
+            template_id: input.templateId,
+            month_date: input.monthDate,
+            due_date: input.dueDate,
+            status: 'confirmed',
+            confirmed_entry_id: insertedEntry.id,
+          },
+          {
+            onConflict: 'user_id,template_id,month_date',
+          },
+        )
+
+      if (occurrenceError) {
+        throw new Error(occurrenceError.message)
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
+  const skipRecurringTemplateForMonth = useCallback(
+    async (input: { templateId: string; monthDate: string; dueDate: string }) => {
+      ensureWritable()
+      const supabase = getSupabaseOrThrow()
+
+      const { error: occurrenceError } = await supabase
+        .from('monthly_cashflow_recurring_occurrences')
+        .upsert(
+          {
+            user_id: userId,
+            template_id: input.templateId,
+            month_date: input.monthDate,
+            due_date: input.dueDate,
+            status: 'skipped',
+            confirmed_entry_id: null,
+          },
+          {
+            onConflict: 'user_id,template_id,month_date',
+          },
+        )
+
+      if (occurrenceError) {
+        throw new Error(occurrenceError.message)
+      }
+
+      await refresh()
+    },
+    [ensureWritable, refresh, userId],
+  )
+
   const importBackup = useCallback(
     async (raw: unknown) => {
       ensureWritable()
@@ -1223,6 +1538,134 @@ export function usePortfolioData(
         }
       }
 
+      const { error: cashflowDeleteError } = await supabase
+        .from('monthly_cashflow_entries')
+        .delete()
+        .eq('user_id', userId)
+
+      if (cashflowDeleteError && !isMissingCashflowTableError(cashflowDeleteError)) {
+        throw new Error(cashflowDeleteError.message)
+      }
+
+      if (
+        !cashflowDeleteError &&
+        payload.cashflowEntries.length > 0
+      ) {
+        const cashflowRows = payload.cashflowEntries.map((entry) => ({
+          user_id: userId,
+          entry_date: entry.entryDate,
+          entry_type: entry.entryType,
+          amount_eur: entry.amountEur,
+          note: entry.note,
+        }))
+
+        const { error: cashflowInsertError } = await supabase
+          .from('monthly_cashflow_entries')
+          .insert(cashflowRows)
+
+        if (cashflowInsertError) {
+          throw new Error(cashflowInsertError.message)
+        }
+      }
+
+      const { error: recurringOccurrencesDeleteError } = await supabase
+        .from('monthly_cashflow_recurring_occurrences')
+        .delete()
+        .eq('user_id', userId)
+
+      if (
+        recurringOccurrencesDeleteError &&
+        !isMissingRecurringOccurrencesTableError(recurringOccurrencesDeleteError)
+      ) {
+        throw new Error(recurringOccurrencesDeleteError.message)
+      }
+
+      const { error: recurringTemplatesDeleteError } = await supabase
+        .from('monthly_cashflow_recurring_templates')
+        .delete()
+        .eq('user_id', userId)
+
+      if (
+        recurringTemplatesDeleteError &&
+        !isMissingRecurringTemplatesTableError(recurringTemplatesDeleteError)
+      ) {
+        throw new Error(recurringTemplatesDeleteError.message)
+      }
+
+      if (!recurringTemplatesDeleteError && payload.recurringTemplates.length > 0) {
+        const templateRows = payload.recurringTemplates.map((template) => ({
+          user_id: userId,
+          name: template.name,
+          entry_type: template.entryType,
+          amount_eur: template.amountEur,
+          day_of_month: template.dayOfMonth,
+          note: template.note,
+          is_active: template.isActive,
+        }))
+
+        const { error: recurringTemplatesInsertError } = await supabase
+          .from('monthly_cashflow_recurring_templates')
+          .insert(templateRows)
+
+        if (recurringTemplatesInsertError) {
+          throw new Error(recurringTemplatesInsertError.message)
+        }
+      }
+
+      if (
+        !recurringTemplatesDeleteError &&
+        !recurringOccurrencesDeleteError &&
+        payload.recurringOccurrences.length > 0
+      ) {
+        const { data: recurringTemplates, error: recurringTemplatesFetchError } =
+          await supabase
+            .from('monthly_cashflow_recurring_templates')
+            .select('id,name,entry_type')
+            .eq('user_id', userId)
+
+        if (recurringTemplatesFetchError) {
+          throw new Error(recurringTemplatesFetchError.message)
+        }
+
+        const recurringTemplateIdByKey = new Map(
+          (recurringTemplates ?? []).map((template) => [
+            `${template.name}|${template.entry_type}`,
+            template.id,
+          ]),
+        )
+
+        const occurrenceRows = payload.recurringOccurrences
+          .map((occurrence) => {
+            const templateId = recurringTemplateIdByKey.get(
+              `${occurrence.templateName}|${occurrence.templateEntryType}`,
+            )
+
+            if (!templateId) {
+              return null
+            }
+
+            return {
+              user_id: userId,
+              template_id: templateId,
+              month_date: occurrence.monthDate,
+              due_date: occurrence.dueDate,
+              status: occurrence.status,
+              confirmed_entry_id: null,
+            }
+          })
+          .filter((occurrence) => occurrence !== null)
+
+        if (occurrenceRows.length > 0) {
+          const { error: recurringOccurrencesInsertError } = await supabase
+            .from('monthly_cashflow_recurring_occurrences')
+            .insert(occurrenceRows)
+
+          if (recurringOccurrencesInsertError) {
+            throw new Error(recurringOccurrencesInsertError.message)
+          }
+        }
+      }
+
       await refresh()
     },
     [ensureWritable, refresh, userId],
@@ -1247,6 +1690,12 @@ export function usePortfolioData(
     deletePosition,
     addOrUpdateGoal,
     deleteGoal,
+    addOrUpdateCashflowEntry,
+    deleteCashflowEntry,
+    addOrUpdateRecurringTemplate,
+    deleteRecurringTemplate,
+    confirmRecurringTemplateForMonth,
+    skipRecurringTemplateForMonth,
     importBackup,
   }
 }
@@ -1280,6 +1729,23 @@ function normalizeState(state: PortfolioDataState): PortfolioDataState {
       ...goal,
       target_eur: Number(goal.target_eur),
     })) as Goal[],
+    cashflowEntries: (state.cashflowEntries ?? []).map((entry) => ({
+      ...entry,
+      amount_eur: Number(entry.amount_eur),
+      note: entry.note ?? null,
+    })) as MonthlyCashflowEntry[],
+    recurringTemplates: (state.recurringTemplates ?? []).map((template) => ({
+      ...template,
+      amount_eur: Number(template.amount_eur),
+      day_of_month: Number(template.day_of_month),
+      note: template.note ?? null,
+      is_active: Boolean(template.is_active),
+    })) as CashflowRecurringTemplate[],
+    recurringOccurrences: (state.recurringOccurrences ?? []).map((occurrence) => ({
+      ...occurrence,
+      confirmed_entry_id: occurrence.confirmed_entry_id ?? null,
+      status: occurrence.status as CashflowRecurringOccurrenceStatus,
+    })) as CashflowRecurringOccurrence[],
   }
 }
 
@@ -1320,5 +1786,56 @@ function isMissingLogoStyleColumnsError(error: {
     message.includes('logo_scale') ||
     message.includes('logo_offset_x') ||
     message.includes('logo_offset_y')
+  )
+}
+
+function isMissingCashflowTableError(error: {
+  code?: string | null
+  message?: string | null
+} | null): boolean {
+  if (!error) {
+    return false
+  }
+
+  const code = error.code?.toUpperCase() ?? ''
+  const message = error.message?.toLowerCase() ?? ''
+
+  return (
+    (code === '42P01' || code.startsWith('PGRST')) &&
+    message.includes('monthly_cashflow_entries')
+  )
+}
+
+function isMissingRecurringTemplatesTableError(error: {
+  code?: string | null
+  message?: string | null
+} | null): boolean {
+  if (!error) {
+    return false
+  }
+
+  const code = error.code?.toUpperCase() ?? ''
+  const message = error.message?.toLowerCase() ?? ''
+
+  return (
+    (code === '42P01' || code.startsWith('PGRST')) &&
+    message.includes('monthly_cashflow_recurring_templates')
+  )
+}
+
+function isMissingRecurringOccurrencesTableError(error: {
+  code?: string | null
+  message?: string | null
+} | null): boolean {
+  if (!error) {
+    return false
+  }
+
+  const code = error.code?.toUpperCase() ?? ''
+  const message = error.message?.toLowerCase() ?? ''
+
+  return (
+    (code === '42P01' || code.startsWith('PGRST')) &&
+    message.includes('monthly_cashflow_recurring_occurrences')
   )
 }

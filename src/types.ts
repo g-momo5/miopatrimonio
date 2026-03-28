@@ -5,6 +5,8 @@ export type InstitutionIcon = 'predefined' | 'custom'
 export type InstitutionKind = 'bank' | 'broker' | 'custom'
 
 export type GoalCategory = 'total' | 'bank' | 'investment'
+export type CashflowEntryType = 'income' | 'invested'
+export type CashflowRecurringOccurrenceStatus = 'pending' | 'confirmed' | 'skipped'
 
 export interface Institution {
   id: string
@@ -63,6 +65,42 @@ export interface Goal {
   updated_at: string
 }
 
+export interface MonthlyCashflowEntry {
+  id: string
+  user_id: string
+  entry_date: string
+  entry_type: CashflowEntryType
+  amount_eur: number
+  note: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CashflowRecurringTemplate {
+  id: string
+  user_id: string
+  name: string
+  entry_type: CashflowEntryType
+  amount_eur: number
+  day_of_month: number
+  note: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CashflowRecurringOccurrence {
+  id: string
+  user_id: string
+  template_id: string
+  month_date: string
+  due_date: string
+  status: CashflowRecurringOccurrenceStatus
+  confirmed_entry_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface SnapshotInput {
   accountId: string
   date: string
@@ -88,6 +126,9 @@ export interface PortfolioDataState {
   snapshots: AccountSnapshot[]
   positions: InvestmentPosition[]
   goals: Goal[]
+  cashflowEntries: MonthlyCashflowEntry[]
+  recurringTemplates: CashflowRecurringTemplate[]
+  recurringOccurrences: CashflowRecurringOccurrence[]
 }
 
 export interface BackupPayload {
@@ -125,5 +166,26 @@ export interface BackupPayload {
   goals: Array<{
     category: GoalCategory
     targetEur: number
+  }>
+  cashflowEntries: Array<{
+    entryDate: string
+    entryType: CashflowEntryType
+    amountEur: number
+    note: string | null
+  }>
+  recurringTemplates: Array<{
+    name: string
+    entryType: CashflowEntryType
+    amountEur: number
+    dayOfMonth: number
+    note: string | null
+    isActive: boolean
+  }>
+  recurringOccurrences: Array<{
+    templateName: string
+    templateEntryType: CashflowEntryType
+    monthDate: string
+    dueDate: string
+    status: CashflowRecurringOccurrenceStatus
   }>
 }

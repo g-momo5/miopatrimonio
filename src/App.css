@@ -76,9 +76,9 @@
   transform: translateX(-50%);
   z-index: 1000;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
-  width: min(252px, calc(100vw - 24px));
+  width: min(314px, calc(100vw - 24px));
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.34);
   border-radius: 999px;
@@ -110,6 +110,12 @@
   stroke-width: 2.1;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.page-nav-text {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .kpi-grid {
@@ -546,6 +552,20 @@ td {
 }
 
 @media (max-width: 720px) {
+  .page-nav {
+    bottom: calc(env(safe-area-inset-bottom) + 2px);
+    padding: 7px;
+  }
+
+  .page-nav button {
+    min-height: 40px;
+  }
+
+  .page-nav-icon {
+    width: 19px;
+    height: 19px;
+  }
+
   .topbar {
     flex-direction: column;
   }

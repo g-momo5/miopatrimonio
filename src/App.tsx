@@ -4,6 +4,7 @@ import {
   Archive,
   ChevronDown,
   ChevronUp,
+  HandCoins,
   House,
   Pencil,
   RotateCcw,
@@ -21,18 +22,22 @@ import {
 } from './constants/presetInstitutions'
 import {
   buildLatestSnapshotMap,
+  buildMonthlyCashflowSummary,
   buildTrendSeries,
   computeGoalProgress,
   computeNetWorth,
 } from './lib/calculations'
 import { buildBackupPayload, downloadFile, toSnapshotsCsv } from './lib/backup'
-import { formatCurrency, formatDate } from './lib/format'
+import { capitalize, formatCurrency, formatDate } from './lib/format'
 import { resolveInstitutionLogoCandidates } from './lib/institutionLogos'
 import { useAuth } from './hooks/useAuth'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { usePortfolioData } from './hooks/usePortfolioData'
 import type {
   AccountSnapshot,
+  CashflowEntryType,
+  CashflowRecurringOccurrence,
+  CashflowRecurringTemplate,
   GoalCategory,
   Institution,
   InstitutionKind,
@@ -45,7 +50,12 @@ interface Feedback {
   message: string
 }
 
-type WorkspacePage = 'dashboard' | 'accounts' | 'investments' | 'settings'
+type WorkspacePage =
+  | 'dashboard'
+  | 'accounts'
+  | 'investments'
+  | 'cashflow'
+  | 'settings'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 const CHART_FALLBACK_COLORS = [
@@ -65,6 +75,10 @@ const DEFAULT_LOGO_OFFSET = 0
 const NEW_CUSTOM_CHOICE = 'new-custom'
 const NEW_CUSTOM_EDITOR_TARGET = 'editor:new-custom'
 const MAX_LOGO_FILE_SIZE_BYTES = 2 * 1024 * 1024
+const monthFormatter = new Intl.DateTimeFormat('it-IT', {
+  month: 'long',
+  year: 'numeric',
+})
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -197,6 +211,12 @@ function PortfolioWorkspace({
     deletePosition,
     addOrUpdateGoal,
     deleteGoal,
+    addOrUpdateCashflowEntry,
+    deleteCashflowEntry,
+    addOrUpdateRecurringTemplate,
+    deleteRecurringTemplate,
+    confirmRecurringTemplateForMonth,
+    skipRecurringTemplateForMonth,
     importBackup,
   } = usePortfolioData(userId, isOnline)
 
@@ -241,6 +261,24 @@ function PortfolioWorkspace({
   const [dashboardBreakdown, setDashboardBreakdown] = useState<
     'bank' | 'investment' | null
   >(null)
+
+  const [cashflowEditingId, setCashflowEditingId] = useState<string | undefined>()
+  const [cashflowEntryType, setCashflowEntryType] = useState<'income' | 'invested'>(
+    'income',
+  )
+  const [cashflowEntryDate, setCashflowEntryDate] = useState(TODAY)
+  const [cashflowAmount, setCashflowAmount] = useState('')
+  const [cashflowNote, setCashflowNote] = useState('')
+  const [recurringTemplateEditingId, setRecurringTemplateEditingId] = useState<
+    string | undefined
+  >()
+  const [recurringTemplateName, setRecurringTemplateName] = useState('')
+  const [recurringTemplateType, setRecurringTemplateType] =
+    useState<CashflowEntryType>('income')
+  const [recurringTemplateAmount, setRecurringTemplateAmount] = useState('')
+  const [recurringTemplateDayOfMonth, setRecurringTemplateDayOfMonth] = useState('27')
+  const [recurringTemplateNote, setRecurringTemplateNote] = useState('')
+  const [recurringTemplateIsActive, setRecurringTemplateIsActive] = useState(true)
 
   const institutionById = useMemo(
     () => new Map(data.institutions.map((institution) => [institution.id, institution])),
@@ -502,6 +540,102 @@ function PortfolioWorkspace({
         return accumulator
       }, {}),
     [data.goals],
+  )
+
+  const sortedCashflowEntries = useMemo(
+    () =>
+      [...data.cashflowEntries].sort((left, right) => {
+        if (left.entry_date === right.entry_date) {
+          return right.updated_at.localeCompare(left.updated_at)
+        }
+
+        return right.entry_date.localeCompare(left.entry_date)
+      }),
+    [data.cashflowEntries],
+  )
+
+  const sortedRecurringTemplates = useMemo(
+    () =>
+      [...data.recurringTemplates].sort((left, right) => {
+        if (left.is_active !== right.is_active) {
+          return left.is_active ? -1 : 1
+        }
+
+        return left.name.localeCompare(right.name)
+      }),
+    [data.recurringTemplates],
+  )
+
+  const currentMonthDate = useMemo(() => toMonthStart(TODAY), [])
+
+  const recurringOccurrencesByTemplateForCurrentMonth = useMemo(() => {
+    const map = new Map<string, CashflowRecurringOccurrence>()
+
+    for (const occurrence of data.recurringOccurrences) {
+      if (occurrence.month_date !== currentMonthDate) {
+        continue
+      }
+
+      map.set(occurrence.template_id, occurrence)
+    }
+
+    return map
+  }, [currentMonthDate, data.recurringOccurrences])
+
+  const recurringPendingRows = useMemo(
+    () =>
+      sortedRecurringTemplates
+        .filter((template) => template.is_active)
+        .map((template) => {
+          const occurrence = recurringOccurrencesByTemplateForCurrentMonth.get(template.id)
+          const status = occurrence?.status ?? 'pending'
+          const dueDate =
+            occurrence?.due_date ??
+            buildMonthDateForDay(currentMonthDate, template.day_of_month)
+
+          return {
+            template,
+            occurrence,
+            status,
+            dueDate,
+          }
+        })
+        .filter((row) => row.status === 'pending'),
+    [currentMonthDate, recurringOccurrencesByTemplateForCurrentMonth, sortedRecurringTemplates],
+  )
+
+  const recurringHandledRows = useMemo(
+    () =>
+      sortedRecurringTemplates
+        .filter((template) => template.is_active)
+        .map((template) => {
+          const occurrence = recurringOccurrencesByTemplateForCurrentMonth.get(template.id)
+          if (!occurrence || occurrence.status === 'pending') {
+            return null
+          }
+
+          return {
+            template,
+            occurrence,
+          }
+        })
+        .filter(
+          (
+            row,
+          ): row is {
+            template: CashflowRecurringTemplate
+            occurrence: CashflowRecurringOccurrence
+          } => row !== null,
+        ),
+    [recurringOccurrencesByTemplateForCurrentMonth, sortedRecurringTemplates],
+  )
+
+  const monthlyCashflowRows = useMemo(
+    () =>
+      buildMonthlyCashflowSummary(data.accounts, data.snapshots, data.cashflowEntries).sort(
+        (left, right) => right.month.localeCompare(left.month),
+      ),
+    [data.accounts, data.cashflowEntries, data.snapshots],
   )
 
   const sortedSnapshots = useMemo(
@@ -857,6 +991,9 @@ function PortfolioWorkspace({
 
   function switchPage(nextPage: WorkspacePage): void {
     setActivePage(nextPage)
+    if (nextPage !== 'dashboard') {
+      setDashboardBreakdown(null)
+    }
 
     if (nextPage === 'accounts') {
       setAccountType('bank')
@@ -883,6 +1020,15 @@ function PortfolioWorkspace({
       setAccountCustomInstitutionLogoUrl('')
       resetSnapshotForm()
       resetPositionForm()
+      return
+    }
+
+    if (nextPage === 'cashflow') {
+      setShowAccountInstitutionChooser(false)
+      resetSnapshotForm()
+      resetPositionForm()
+      resetCashflowForm()
+      resetRecurringTemplateForm()
       return
     }
 
@@ -1025,6 +1171,143 @@ function PortfolioWorkspace({
     setPositionName('')
     setPositionSymbol('')
     setPositionValue('')
+  }
+
+  async function handleSubmitCashflowEntry(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault()
+
+    await runAction(async () => {
+      const parsedAmount = Number(cashflowAmount)
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+        throw new Error('Inserisci un importo valido')
+      }
+
+      await addOrUpdateCashflowEntry({
+        entryId: cashflowEditingId,
+        entryDate: cashflowEntryDate,
+        entryType: cashflowEntryType,
+        amountEur: parsedAmount,
+        note: cashflowNote,
+      })
+
+      resetCashflowForm()
+    }, cashflowEditingId ? 'Movimento aggiornato' : 'Movimento salvato')
+  }
+
+  function beginCashflowEdit(entryId: string): void {
+    const entry = sortedCashflowEntries.find((item) => item.id === entryId)
+    if (!entry) {
+      return
+    }
+
+    setCashflowEditingId(entry.id)
+    setCashflowEntryType(entry.entry_type)
+    setCashflowEntryDate(entry.entry_date)
+    setCashflowAmount(String(entry.amount_eur))
+    setCashflowNote(entry.note ?? '')
+  }
+
+  function resetCashflowForm(): void {
+    setCashflowEditingId(undefined)
+    setCashflowEntryType('income')
+    setCashflowEntryDate(TODAY)
+    setCashflowAmount('')
+    setCashflowNote('')
+  }
+
+  async function handleSubmitRecurringTemplate(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault()
+
+    await runAction(async () => {
+      const parsedAmount = Number(recurringTemplateAmount)
+      const parsedDayOfMonth = Number(recurringTemplateDayOfMonth)
+
+      if (!recurringTemplateName.trim()) {
+        throw new Error('Inserisci il nome template')
+      }
+
+      if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+        throw new Error('Inserisci un importo template valido')
+      }
+
+      if (
+        !Number.isInteger(parsedDayOfMonth) ||
+        parsedDayOfMonth < 1 ||
+        parsedDayOfMonth > 31
+      ) {
+        throw new Error('Inserisci un giorno mese valido (1-31)')
+      }
+
+      await addOrUpdateRecurringTemplate({
+        templateId: recurringTemplateEditingId,
+        name: recurringTemplateName,
+        entryType: recurringTemplateType,
+        amountEur: parsedAmount,
+        dayOfMonth: parsedDayOfMonth,
+        note: recurringTemplateNote,
+        isActive: recurringTemplateIsActive,
+      })
+
+      resetRecurringTemplateForm()
+    }, recurringTemplateEditingId ? 'Template aggiornato' : 'Template ricorrente creato')
+  }
+
+  function beginRecurringTemplateEdit(templateId: string): void {
+    const template = sortedRecurringTemplates.find((item) => item.id === templateId)
+    if (!template) {
+      return
+    }
+
+    setRecurringTemplateEditingId(template.id)
+    setRecurringTemplateName(template.name)
+    setRecurringTemplateType(template.entry_type)
+    setRecurringTemplateAmount(String(template.amount_eur))
+    setRecurringTemplateDayOfMonth(String(template.day_of_month))
+    setRecurringTemplateNote(template.note ?? '')
+    setRecurringTemplateIsActive(template.is_active)
+  }
+
+  function resetRecurringTemplateForm(): void {
+    setRecurringTemplateEditingId(undefined)
+    setRecurringTemplateName('')
+    setRecurringTemplateType('income')
+    setRecurringTemplateAmount('')
+    setRecurringTemplateDayOfMonth('27')
+    setRecurringTemplateNote('')
+    setRecurringTemplateIsActive(true)
+  }
+
+  async function handleConfirmRecurringTemplate(
+    template: CashflowRecurringTemplate,
+    dueDate: string,
+  ): Promise<void> {
+    await runAction(async () => {
+      await confirmRecurringTemplateForMonth({
+        templateId: template.id,
+        monthDate: currentMonthDate,
+        dueDate,
+        entryType: template.entry_type,
+        amountEur: Number(template.amount_eur),
+        note: template.note ?? undefined,
+      })
+    }, 'Template confermato e movimento registrato')
+  }
+
+  async function handleSkipRecurringTemplate(
+    template: CashflowRecurringTemplate,
+    dueDate: string,
+  ): Promise<void> {
+    await runAction(async () => {
+      await skipRecurringTemplateForMonth({
+        templateId: template.id,
+        monthDate: currentMonthDate,
+        dueDate,
+      })
+    }, 'Template segnato come saltato per questo mese')
   }
 
   async function handleSubmitGoal(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -1192,6 +1475,15 @@ function PortfolioWorkspace({
           aria-label="Investimenti"
         >
           <TrendingUp className="page-nav-icon" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className={activePage === 'cashflow' ? 'active' : ''}
+          onClick={() => switchPage('cashflow')}
+          title="Cashflow"
+          aria-label="Cashflow"
+        >
+          <HandCoins className="page-nav-icon" aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -1546,6 +1838,415 @@ function PortfolioWorkspace({
                     disabled={offlineReadOnly}
                   />
                 </label>
+              </div>
+            </article>
+          </>
+        ) : null}
+
+        {activePage === 'cashflow' ? (
+          <>
+            <article className="panel">
+              <h2>Movimenti mensili</h2>
+              <p className="muted">Registra entrate e denaro investito (conti → investimenti)</p>
+              <form className="grid form-grid" onSubmit={handleSubmitCashflowEntry}>
+                <label className="stack">
+                  Tipo movimento
+                  <select
+                    value={cashflowEntryType}
+                    onChange={(event) =>
+                      setCashflowEntryType(event.target.value as 'income' | 'invested')
+                    }
+                  >
+                    <option value="income">Entrata</option>
+                    <option value="invested">Investito</option>
+                  </select>
+                </label>
+
+                <label className="stack">
+                  Data
+                  <input
+                    type="date"
+                    value={cashflowEntryDate}
+                    onChange={(event) => setCashflowEntryDate(event.target.value)}
+                  />
+                </label>
+
+                <label className="stack">
+                  Importo EUR
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={cashflowAmount}
+                    onChange={(event) => setCashflowAmount(event.target.value)}
+                    placeholder="0.00"
+                  />
+                </label>
+
+                <label className="stack">
+                  Nota opzionale
+                  <input
+                    type="text"
+                    value={cashflowNote}
+                    onChange={(event) => setCashflowNote(event.target.value)}
+                    placeholder="Es. stipendio, bonifico su broker"
+                  />
+                </label>
+
+                <div className="actions-row">
+                  <button type="submit" disabled={offlineReadOnly}>
+                    {cashflowEditingId ? 'Salva modifica' : 'Aggiungi movimento'}
+                  </button>
+                  {cashflowEditingId ? (
+                    <button type="button" className="secondary" onClick={resetCashflowForm}>
+                      Annulla
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            </article>
+
+            <article className="panel panel-wide">
+              <h2>Ricorrenze da confermare ({formatMonth(currentMonthDate.slice(0, 7))})</h2>
+              <p className="muted">
+                Nessun inserimento automatico: conferma o salta manualmente ogni template.
+              </p>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Template</th>
+                      <th>Tipo</th>
+                      <th>Importo</th>
+                      <th>Data proposta</th>
+                      <th>Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recurringPendingRows.map((row) => (
+                      <tr key={row.template.id}>
+                        <td>{row.template.name}</td>
+                        <td>{row.template.entry_type === 'income' ? 'Entrata' : 'Investito'}</td>
+                        <td>{formatCurrency(Number(row.template.amount_eur))}</td>
+                        <td>{formatDate(row.dueDate)}</td>
+                        <td>
+                          <div className="inline-actions">
+                            <button
+                              type="button"
+                              disabled={offlineReadOnly}
+                              onClick={() =>
+                                void handleConfirmRecurringTemplate(row.template, row.dueDate)
+                              }
+                            >
+                              Conferma
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={offlineReadOnly}
+                              onClick={() =>
+                                void handleSkipRecurringTemplate(row.template, row.dueDate)
+                              }
+                            >
+                              Salta
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {recurringPendingRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>Nessun template da confermare per questo mese.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              {recurringHandledRows.length > 0 ? (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Template</th>
+                        <th>Stato</th>
+                        <th>Data</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recurringHandledRows.map((row) => (
+                        <tr key={row.occurrence.id}>
+                          <td>{row.template.name}</td>
+                          <td>
+                            {row.occurrence.status === 'confirmed' ? 'Confermato' : 'Saltato'}
+                          </td>
+                          <td>{formatDate(row.occurrence.due_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </article>
+
+            <article className="panel panel-wide">
+              <h2>Template ricorrenti</h2>
+              <p className="muted">
+                Definisci entrate/investimenti fissi mensili da confermare manualmente.
+              </p>
+              <form className="grid form-grid" onSubmit={handleSubmitRecurringTemplate}>
+                <label className="stack">
+                  Nome template
+                  <input
+                    type="text"
+                    value={recurringTemplateName}
+                    onChange={(event) => setRecurringTemplateName(event.target.value)}
+                    placeholder="Es. Stipendio"
+                  />
+                </label>
+
+                <label className="stack">
+                  Tipo
+                  <select
+                    value={recurringTemplateType}
+                    onChange={(event) =>
+                      setRecurringTemplateType(event.target.value as CashflowEntryType)
+                    }
+                  >
+                    <option value="income">Entrata</option>
+                    <option value="invested">Investito</option>
+                  </select>
+                </label>
+
+                <label className="stack">
+                  Importo EUR
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={recurringTemplateAmount}
+                    onChange={(event) => setRecurringTemplateAmount(event.target.value)}
+                    placeholder="0.00"
+                  />
+                </label>
+
+                <label className="stack">
+                  Giorno del mese (1-31)
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    step="1"
+                    value={recurringTemplateDayOfMonth}
+                    onChange={(event) => setRecurringTemplateDayOfMonth(event.target.value)}
+                  />
+                </label>
+
+                <label className="stack">
+                  Nota opzionale
+                  <input
+                    type="text"
+                    value={recurringTemplateNote}
+                    onChange={(event) => setRecurringTemplateNote(event.target.value)}
+                    placeholder="Es. stipendio mensile"
+                  />
+                </label>
+
+                <label className="stack">
+                  Stato
+                  <select
+                    value={recurringTemplateIsActive ? 'active' : 'inactive'}
+                    onChange={(event) =>
+                      setRecurringTemplateIsActive(event.target.value === 'active')
+                    }
+                  >
+                    <option value="active">Attivo</option>
+                    <option value="inactive">Disattivo</option>
+                  </select>
+                </label>
+
+                <div className="actions-row">
+                  <button type="submit" disabled={offlineReadOnly}>
+                    {recurringTemplateEditingId ? 'Salva template' : 'Aggiungi template'}
+                  </button>
+                  {recurringTemplateEditingId ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={resetRecurringTemplateForm}
+                    >
+                      Annulla
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nome</th>
+                      <th>Tipo</th>
+                      <th>Importo</th>
+                      <th>Giorno</th>
+                      <th>Stato</th>
+                      <th>Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedRecurringTemplates.map((template) => (
+                      <tr key={template.id}>
+                        <td>{template.name}</td>
+                        <td>{template.entry_type === 'income' ? 'Entrata' : 'Investito'}</td>
+                        <td>{formatCurrency(Number(template.amount_eur))}</td>
+                        <td>{template.day_of_month}</td>
+                        <td>{template.is_active ? 'Attivo' : 'Disattivo'}</td>
+                        <td>
+                          <div className="inline-actions">
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => beginRecurringTemplateEdit(template.id)}
+                            >
+                              Modifica
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost"
+                              disabled={offlineReadOnly}
+                              onClick={() =>
+                                void runAction(
+                                  () =>
+                                    addOrUpdateRecurringTemplate({
+                                      templateId: template.id,
+                                      name: template.name,
+                                      entryType: template.entry_type,
+                                      amountEur: Number(template.amount_eur),
+                                      dayOfMonth: Number(template.day_of_month),
+                                      note: template.note ?? undefined,
+                                      isActive: !template.is_active,
+                                    }),
+                                  template.is_active
+                                    ? 'Template disattivato'
+                                    : 'Template attivato',
+                                )
+                              }
+                            >
+                              {template.is_active ? 'Disattiva' : 'Attiva'}
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost danger"
+                              disabled={offlineReadOnly}
+                              onClick={() =>
+                                void runAction(
+                                  () => deleteRecurringTemplate(template.id),
+                                  'Template eliminato',
+                                )
+                              }
+                            >
+                              Elimina
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {sortedRecurringTemplates.length === 0 ? (
+                      <tr>
+                        <td colSpan={6}>Nessun template ricorrente disponibile.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article className="panel panel-wide">
+              <h2>Elenco movimenti</h2>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Tipo</th>
+                      <th>Importo</th>
+                      <th>Nota</th>
+                      <th>Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedCashflowEntries.map((entry) => (
+                      <tr key={entry.id}>
+                        <td>{formatDate(entry.entry_date)}</td>
+                        <td>{entry.entry_type === 'income' ? 'Entrata' : 'Investito'}</td>
+                        <td>{formatCurrency(Number(entry.amount_eur))}</td>
+                        <td>{entry.note ?? '-'}</td>
+                        <td>
+                          <div className="inline-actions">
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => beginCashflowEdit(entry.id)}
+                            >
+                              Modifica
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost danger"
+                              disabled={offlineReadOnly}
+                              onClick={() =>
+                                void runAction(
+                                  () => deleteCashflowEntry(entry.id),
+                                  'Movimento eliminato',
+                                )
+                              }
+                            >
+                              Elimina
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {sortedCashflowEntries.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>Nessun movimento disponibile.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article className="panel panel-wide">
+              <h2>Riepilogo mensile</h2>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Mese</th>
+                      <th>Guadagnato</th>
+                      <th>Investito</th>
+                      <th>Speso</th>
+                      <th>Risparmiato</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyCashflowRows.map((row) => (
+                      <tr key={row.month}>
+                        <td>{formatMonth(row.month)}</td>
+                        <td>{formatCurrency(row.earned)}</td>
+                        <td>{formatCurrency(row.invested)}</td>
+                        <td>{row.spent === null ? 'N/D' : formatCurrency(row.spent)}</td>
+                        <td>{row.saved === null ? 'N/D' : formatCurrency(row.saved)}</td>
+                      </tr>
+                    ))}
+                    {monthlyCashflowRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>Nessun mese calcolabile al momento.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
             </article>
           </>
@@ -2087,6 +2788,22 @@ function goalLabel(category: GoalCategory): string {
   }
 
   return 'Totale patrimonio'
+}
+
+function formatMonth(month: string): string {
+  return capitalize(monthFormatter.format(new Date(`${month}-01T00:00:00.000Z`)))
+}
+
+function toMonthStart(dateValue: string): string {
+  return `${dateValue.slice(0, 7)}-01`
+}
+
+function buildMonthDateForDay(monthDate: string, dayOfMonth: number): string {
+  const [year, month] = monthDate.split('-').map(Number)
+  const monthEnd = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  const safeDay = Math.min(Math.max(dayOfMonth, 1), monthEnd)
+  const date = new Date(Date.UTC(year, month - 1, safeDay))
+  return date.toISOString().slice(0, 10)
 }
 
 function SupabaseSetupScreen() {

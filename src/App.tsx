@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { ChangeEvent, FormEvent } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import {
   Archive,
+  ChevronDown,
+  ChevronUp,
   House,
   Pencil,
   RotateCcw,
@@ -236,6 +238,9 @@ function PortfolioWorkspace({
 
   const [goalCategory, setGoalCategory] = useState<GoalCategory>('total')
   const [goalTarget, setGoalTarget] = useState('')
+  const [dashboardBreakdown, setDashboardBreakdown] = useState<
+    'bank' | 'investment' | null
+  >(null)
 
   const institutionById = useMemo(
     () => new Map(data.institutions.map((institution) => [institution.id, institution])),
@@ -407,6 +412,32 @@ function PortfolioWorkspace({
   const latestSnapshotMap = useMemo(
     () => buildLatestSnapshotMap(data.snapshots),
     [data.snapshots],
+  )
+
+  const dashboardBankAccounts = useMemo(
+    () =>
+      activeAccounts
+        .filter((account) => account.account_type === 'bank')
+        .map((account) => ({
+          id: account.id,
+          name: account.name,
+          value: latestSnapshotMap.get(account.id)?.value_eur ?? null,
+        }))
+        .sort((left, right) => Number(right.value ?? -1) - Number(left.value ?? -1)),
+    [activeAccounts, latestSnapshotMap],
+  )
+
+  const dashboardInvestmentAccounts = useMemo(
+    () =>
+      activeAccounts
+        .filter((account) => account.account_type === 'investment')
+        .map((account) => ({
+          id: account.id,
+          name: account.name,
+          value: latestSnapshotMap.get(account.id)?.value_eur ?? null,
+        }))
+        .sort((left, right) => Number(right.value ?? -1) - Number(left.value ?? -1)),
+    [activeAccounts, latestSnapshotMap],
   )
 
   const summary = useMemo(
@@ -860,6 +891,22 @@ function PortfolioWorkspace({
     resetPositionForm()
   }
 
+  function toggleDashboardBreakdown(type: 'bank' | 'investment'): void {
+    setDashboardBreakdown((current) => (current === type ? null : type))
+  }
+
+  function handleDashboardBreakdownKeyDown(
+    event: KeyboardEvent<HTMLElement>,
+    type: 'bank' | 'investment',
+  ): void {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+
+    event.preventDefault()
+    toggleDashboardBreakdown(type)
+  }
+
   async function handleSubmitSnapshot(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
@@ -1089,6 +1136,10 @@ function PortfolioWorkspace({
     icon_mode: editorPreviewIconMode,
     icon_url: editorLogoUrl.trim() || null,
   }
+  const dashboardBreakdownItems =
+    dashboardBreakdown === 'bank'
+      ? dashboardBankAccounts
+      : dashboardInvestmentAccounts
 
   if (loading) {
     return <LoadingScreen label="Caricamento patrimonio..." />
@@ -1170,15 +1221,71 @@ function PortfolioWorkspace({
               <span>Patrimonio totale</span>
               <strong>{formatCurrency(summary.total)}</strong>
             </article>
-            <article className="kpi-card">
-              <span>Subtotale conti</span>
+            <article
+              className="kpi-card kpi-card-clickable"
+              role="button"
+              tabIndex={0}
+              onClick={() => toggleDashboardBreakdown('bank')}
+              onKeyDown={(event) => handleDashboardBreakdownKeyDown(event, 'bank')}
+              aria-label="Apri o chiudi elenco conti con saldo attuale"
+            >
+              <div className="kpi-card-head">
+                <span>Subtotale conti</span>
+                {dashboardBreakdown === 'bank' ? (
+                  <ChevronUp className="kpi-card-chevron" aria-hidden="true" />
+                ) : (
+                  <ChevronDown className="kpi-card-chevron" aria-hidden="true" />
+                )}
+              </div>
               <strong>{formatCurrency(summary.bank)}</strong>
             </article>
-            <article className="kpi-card">
-              <span>Subtotale investimenti</span>
+            <article
+              className="kpi-card kpi-card-clickable"
+              role="button"
+              tabIndex={0}
+              onClick={() => toggleDashboardBreakdown('investment')}
+              onKeyDown={(event) =>
+                handleDashboardBreakdownKeyDown(event, 'investment')
+              }
+              aria-label="Apri o chiudi elenco investimenti con saldo attuale"
+            >
+              <div className="kpi-card-head">
+                <span>Subtotale investimenti</span>
+                {dashboardBreakdown === 'investment' ? (
+                  <ChevronUp className="kpi-card-chevron" aria-hidden="true" />
+                ) : (
+                  <ChevronDown className="kpi-card-chevron" aria-hidden="true" />
+                )}
+              </div>
               <strong>{formatCurrency(summary.investment)}</strong>
             </article>
           </section>
+
+          {dashboardBreakdown ? (
+            <article className="panel">
+              <h2>
+                {dashboardBreakdown === 'bank'
+                  ? 'Elenco conti e saldo attuale'
+                  : 'Elenco investimenti e saldo attuale'}
+              </h2>
+              <div className="dashboard-breakdown-list">
+                {dashboardBreakdownItems.map((item) => (
+                  <div className="dashboard-breakdown-row" key={item.id}>
+                    <strong>{item.name}</strong>
+                    <strong>
+                      {item.value === null ? 'N/D' : formatCurrency(Number(item.value))}
+                    </strong>
+                  </div>
+                ))}
+                {dashboardBreakdownItems.length === 0 ? (
+                  <p className="muted">
+                    Nessun {dashboardBreakdown === 'bank' ? 'conto' : 'investimento'} attivo
+                    disponibile.
+                  </p>
+                ) : null}
+              </div>
+            </article>
+          ) : null}
 
           <PortfolioCharts
             trendData={trendData}

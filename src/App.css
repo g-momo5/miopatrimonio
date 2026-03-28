@@ -136,6 +136,34 @@
   font-size: 1.55rem;
 }
 
+.kpi-card-clickable {
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.kpi-card-clickable:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.45);
+}
+
+.kpi-card-clickable:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
+.kpi-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kpi-card-chevron {
+  width: 18px;
+  height: 18px;
+  color: #475569;
+}
+
 .grid {
   display: grid;
   gap: 12px;
@@ -328,6 +356,35 @@ button.ghost.danger {
 
 .list-row.spread {
   justify-content: space-between;
+}
+
+.dashboard-breakdown-list {
+  display: grid;
+  gap: 0;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.dashboard-breakdown-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.dashboard-breakdown-row::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  border-bottom: 1px solid #dbe4ee;
+}
+
+.dashboard-breakdown-row:last-child::after {
+  display: none;
 }
 
 .inline {

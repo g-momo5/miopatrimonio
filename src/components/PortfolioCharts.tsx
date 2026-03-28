@@ -23,7 +23,7 @@ interface PortfolioChartsProps {
   goalTargets: Partial<Record<GoalCategory, number>>
 }
 
-const PIE_COLORS = ['#2f4858', '#33658a', '#86bbd8', '#f6ae2d']
+const PIE_COLORS = ['#3f5f8a', '#4f7a68', '#9fb0c3', '#d4dee8']
 const INSTITUTION_COLORS = [
   '#0f766e',
   '#2563eb',
